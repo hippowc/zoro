@@ -1,0 +1,9 @@
+[package]
+name = "zoro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "zoro CLI frontend"
+
+[dependencies]
+zoro-core = { path = "../zoro-core" }
