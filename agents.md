@@ -14,7 +14,8 @@
 **zoro**：本地优先、可扩展的通用知识库框架。
 
 - 核心 = 一个 Rust library（`zoro-core`）+ 一个最小 CLI 前端（`zoro`）。
-- 愿景四步走：**工具 → 站点 → 云 → 安全**（见 §11 产品路线图）。
+- **非终端优先**：CLI 与 Web 是平级前端——Web（`zoro serve`）是大众入口，CLI fzf 是效率入口，终端不是唯一形态。
+- 愿景四步走：**标签体系 → Web 体验 → 站点/云/安全**（见 §11 产品路线图）。
 - 内容源**只有一种**：Markdown（+ `@` 指令）。HTML 是渲染产物，不是源码。
 
 ## 2. 核心边界（最重要的口径）
@@ -73,7 +74,7 @@ git reset --hard <commit>
 
 - `@cmd` 后（跳过空行）必须紧跟 fenced code block；块内每行是该 `@cmd` 的负载。
 - 语言取自 fence info string；一个 `@cmd` 绑一个块；无块则**警告并忽略**。
-- v1：`@cmd` 被识别、校验、随正文展示，不提供复制/执行（§11 P2）。
+- v1：`@cmd` 被识别、校验、随正文展示，不提供复制/执行（§11 P3）。
 
 ### 4.4 边界规则（现场推导，不存 end）
 
@@ -182,7 +183,7 @@ zoro/
 │   ├── zoro-core/          # library：模型/解析/索引/查询/渲染管线/trait
 │   └── zoro/               # thin CLI frontend（捆绑 fzf）
 ├── ext/                    # 扩展（可独立 repo 或本仓库 workspace）
-│   ├── zoro-server/        # P4 本地 Web
+│   ├── zoro-server/        # P2 本地 Web
 │   ├── zoro-desktop/       # Tauri 桌面壳
 │   └── zoro-publish/       # P5 静态站点导出
 ├── assets/fzf-<platform>   # 仅 CLI 前端捆绑
@@ -199,8 +200,8 @@ zoro/
 | 语法高亮 | `syntect` |
 | 核心模糊匹配 | `nucleo`（纯 matcher） |
 | CLI 交互 | `fzf`（前端捆绑，不进 core） |
-| 全文搜索 | `tantivy`（P3） |
-| 本地 Web | `axum`/`warp`（P4，ext） |
+| 全文搜索 | `tantivy`（P4） |
+| 本地 Web | `axum`/`warp`（P2，ext） |
 | 桌面壳 | `tauri`（ext） |
 | 站点搜索 | `pagefind`（P5，ext） |
 | 同步 | git 首发，再 `object_store`/WebDAV（P6，ext） |
@@ -210,16 +211,17 @@ zoro/
 
 | 阶段 | 交付 | 归属 |
 |------|------|------|
-| P0 | `@index/@cmd` 解析 + 索引 + CLI fzf 浏览 | core + CLI |
-| P1 | Markdown→HTML/ANSI 渲染管线 | core |
-| P2 | Action 分发（编辑/执行/打开，`@cmd` 复制/执行） | core + CLI |
-| P3 | tantivy 全文搜索 | core |
-| P4 | `zoro serve` 本地 Web | ext/zoro-server |
+| P0 | **标签体系**：`@index/@cmd/@card` 解析 + 索引（无 UI） | core |
+| P1 | **渲染管线**：Markdown→HTML/ANSI（多 target） | core |
+| P2 | **本地 Web**：`zoro serve` 浏览器体验（大众入口） | ext/zoro-server |
+| P3 | **CLI 前端**：fzf 浏览 + `@cmd` 复制/执行（效率入口） | zoro |
+| P4 | 全文搜索 tantivy | core |
 | P5 | 静态站点发布 | ext/zoro-publish |
 | P6 | 同步插件（git 首发） | core trait + ext |
 | P7 | age 整库加密 + 密钥授权 | core trait + ext |
 
-核心到 P3 后冻结，P4 起只加 trait、不往 core 塞 UI。
+- core 到 **P1** 后基本冻结（标签 + 渲染是共同地基）；P2 起 CLI 与 Web 是**平级前端**，非终端用户走 Web。
+- P2 与 P3 可并行；Web 是大众入口，CLI 是效率入口。
 
 ## 12. 待定项（backlog）
 
@@ -247,15 +249,16 @@ zoro/
 - **不把标记变成编程语言**：指令只做分类/声明，逻辑交给运行时扩展点。
 - **测试轻量**：Rust `tests/` + 文本夹具，不引入额外框架。
 
-## 14. 验收标准（P0）
+## 14. 验收标准（P0–P3 按阶段）
 
-- [ ] `zoro` 无参进入 fzf 全量浏览；候选区显示标题。
-- [ ] `zoro 初始词` 预填 query，可改写/清空。
+- [ ] 【P3】`zoro` 无参进入 fzf 全量浏览；候选区显示标题。
+- [ ] 【P3】`zoro 初始词` 预填 query，可改写/清空。
 - [ ] 连续两条 `@index` 条目展示正确、无粘连；条目到 EOF 不越界。
 - [ ] `title`：有 `##` 取 `##`，无则取 index 首词。
 - [ ] `@cmd` 正确绑定紧随 fence；无 fence 警告忽略、不崩溃。
 - [ ] 未变更直接读索引；某 `.md` 更新后自动重建。
-- [ ] CLI 缺 fzf（未捆绑场景）报错或走非交互输出；无 TTY 时 `zoro | less` 可用。
-- [ ] `--preview` 随选随显；回车全屏展示。
-- [ ] 单二进制（捆绑 fzf）在新机器零安装跑通全链路。
+- [ ] 【P3】CLI 缺 fzf 报错或走非交互输出；无 TTY 时 `zoro | less` 可用。
+- [ ] 【P3】`--preview` 随选随显；回车全屏展示。
+- [ ] 【P3】单二进制（捆绑 fzf）在新机器零安装跑通全链路。
 - [ ] `zoro-core` 无 fzf / 无 UI 依赖（`cargo tree` 可验证）。
+- [ ] 【P2】`zoro serve` 在浏览器完成浏览/搜索/渲染，全程无需终端。
