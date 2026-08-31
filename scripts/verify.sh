@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/target/release/zoro"
 KB="$ROOT/examples/knowledge-base"
-export ZORO_ROOT="$KB"
+export ZORO_WORKSPACE="$KB/zoro.toml"
 
 echo "== zoro index =="
 "$BIN" index

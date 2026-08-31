@@ -2,36 +2,55 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::config::LibraryConfig;
 use crate::{index, meta, query, scan, Entry};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// 一个知识库：名称 + 内容根 + 条目（三元组身份的 `library` 分量）。
+/// 一个知识库：名称 + 内容根 + 库级配置 + 条目。
+///
+/// 条目三元组身份的 `library` 分量即 `name`。
 #[derive(Debug, Clone)]
 pub struct Library {
     pub name: String,
     pub root: PathBuf,
+    pub config: LibraryConfig,
     pub entries: Vec<Entry>,
 }
 
 impl Library {
     /// 全量扫描一个内容根（在线模式，`entry.raw` 有值）。
     pub fn open(name: &str, root: &Path) -> Result<Self> {
+        Self::open_with_config(name, root, LibraryConfig::default())
+    }
+
+    /// 冷启动优先：manifest 存在且未过期则直接读元数据；否则全量扫描并落盘。
+    pub fn open_cached(name: &str, root: &Path) -> Result<Self> {
+        Self::open_cached_with_config(name, root, LibraryConfig::default())
+    }
+
+    /// 带库级配置的全量扫描。
+    pub fn open_with_config(name: &str, root: &Path, config: LibraryConfig) -> Result<Self> {
         let mut lib = Self {
             name: name.to_string(),
             root: root.to_path_buf(),
+            config,
             entries: Vec::new(),
         };
         lib.rescan()?;
         Ok(lib)
     }
 
-    /// 冷启动优先：manifest 存在且未过期则直接读元数据（`entry.raw` 为空）；
-    /// 否则全量扫描并落盘。
-    pub fn open_cached(name: &str, root: &Path) -> Result<Self> {
+    /// 带库级配置的冷启动优先打开。
+    pub fn open_cached_with_config(
+        name: &str,
+        root: &Path,
+        config: LibraryConfig,
+    ) -> Result<Self> {
         let mut lib = Self {
             name: name.to_string(),
             root: root.to_path_buf(),
+            config,
             entries: Vec::new(),
         };
         lib.analyze(false)?;
@@ -103,13 +122,18 @@ impl Library {
             )
             .into());
         }
+        if manifest.library.name != self.name {
+            return Err(format!(
+                "manifest library name '{}' does not match workspace declaration '{}'",
+                manifest.library.name, self.name
+            )
+            .into());
+        }
         self.entries = manifest.into_entries(&self.name);
         Ok(())
     }
 
     /// 现场截取条目原文：按 `(path, start)` 重读源文件并推导边界。
-    ///
-    /// 冷启动后 `entry.raw` 为空，展示/渲染前调用此方法补齐。
     pub fn load_raw(&self, entry: &Entry) -> Result<String> {
         let text = fs::read_to_string(self.root.join(&entry.path))?;
         Ok(scan::slice_entry(&text, entry.start))
@@ -152,7 +176,11 @@ fn has_newer_md(root: &Path, since: std::time::SystemTime) -> Result<bool> {
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖。
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!("{}.tmp", path.extension().unwrap_or_default().to_string_lossy()));
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let tmp = path.with_extension(format!("{ext}.tmp"));
     let mut f = fs::File::create(&tmp)?;
     f.write_all(bytes)?;
     f.sync_all()?;

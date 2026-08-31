@@ -10,8 +10,8 @@ fn fixture(tag: &str) -> PathBuf {
         .join(tag)
 }
 
-/// 把 fixture 复制到临时目录，避免测试在仓库内写入 .zoro / zoro-index.tsv。
-fn copy_fixture(tag: &str) -> PathBuf {
+/// 一个唯一的临时目录，避免测试在仓库内写入 .zoro / zoro-index.tsv。
+fn unique_tmp(tag: &str) -> PathBuf {
     let uniq = format!(
         "zoro-test-{}-{}-{:?}",
         tag,
@@ -21,7 +21,11 @@ fn copy_fixture(tag: &str) -> PathBuf {
             .unwrap()
             .as_nanos()
     );
-    let dst = std::env::temp_dir().join(uniq);
+    std::env::temp_dir().join(uniq)
+}
+
+fn copy_fixture(tag: &str) -> PathBuf {
+    let dst = unique_tmp(tag);
     copy_dir(&fixture(tag), &dst).unwrap();
     dst
 }
@@ -64,11 +68,39 @@ fn multi_library_does_not_cross_contaminate() {
     assert_eq!(hits[0].library, "lib-a");
     assert_eq!(hits[0].title, "资产配置");
 
-    // 命中按身份三元组现场截取正文
     let raw = ws
         .load_raw(&hits[0].library, &hits[0].path, hits[0].start)
         .unwrap();
     assert!(raw.contains("@index 定投 止盈 资产配置"));
+}
+
+#[test]
+fn from_toml_file_with_relative_roots() {
+    let base = unique_tmp("workspace");
+    copy_dir(&fixture(FIXTURES), &base.join("lib-a")).unwrap();
+    copy_dir(&fixture(FIXTURES2), &base.join("lib-b")).unwrap();
+    fs::write(
+        base.join("zoro.toml"),
+        r#"
+default = "lib-a"
+
+[[libraries]]
+name = "lib-a"
+root = "lib-a"
+
+[[libraries]]
+name = "lib-b"
+root = "lib-b"
+"#,
+    )
+    .unwrap();
+
+    let ws = Workspace::from_toml_file(&base.join("zoro.toml")).unwrap();
+    assert_eq!(ws.library_names(), vec!["lib-a", "lib-b"]);
+
+    let hits = ws.query("定投");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].library, "lib-a");
 }
 
 #[test]

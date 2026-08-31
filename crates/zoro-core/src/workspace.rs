@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::{library::Library, query, Entry};
+use crate::config::WorkspaceConfig;
+use crate::library::Library;
+use crate::{query, Entry};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -14,31 +16,49 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// 由 `name=path` 声明列表构建工作区（冷启动优先，过期自动重建）。
-    pub fn from_libs(specs: &[(String, PathBuf)]) -> Result<Self> {
+    /// 由工作区声明构建（冷启动优先，过期自动重建）。
+    pub fn from_config(config: &WorkspaceConfig) -> Result<Self> {
         let mut seen = BTreeSet::new();
-        for (name, _) in specs {
-            if !seen.insert(name.clone()) {
-                return Err(format!("duplicate library name: {name}").into());
+        for lib in &config.libraries {
+            if !seen.insert(lib.name.as_str()) {
+                return Err(format!("duplicate library name: {}", lib.name).into());
             }
         }
-        let mut libraries = Vec::with_capacity(specs.len());
-        for (name, path) in specs {
-            libraries.push(Library::open_cached(name, path)?);
+        let mut libraries = Vec::with_capacity(config.libraries.len());
+        for lib in &config.libraries {
+            libraries.push(Library::open_cached_with_config(
+                &lib.name,
+                &lib.root,
+                lib.config.clone(),
+            )?);
         }
         Ok(Self { libraries })
     }
 
-    /// 单库便捷构造（`ZORO_ROOT` 场景）。
-    pub fn single(name: &str, root: &Path) -> Result<Self> {
-        Self::from_libs(&[(name.to_string(), root.to_path_buf())])
+    /// 读 `zoro.toml` 并构建工作区（`root` 相对路径按文件所在目录解析）。
+    pub fn from_toml_file(path: &Path) -> Result<Self> {
+        let config = WorkspaceConfig::from_path(path)?;
+        Self::from_config(&config)
+    }
+
+    /// 以默认配置声明若干库（编程 API / 测试便捷）。
+    pub fn from_libs(specs: &[(String, PathBuf)]) -> Result<Self> {
+        let config = WorkspaceConfig {
+            default: None,
+            libraries: specs
+                .iter()
+                .map(|(name, root)| crate::config::LibrarySpec {
+                    name: name.clone(),
+                    root: root.clone(),
+                    config: Default::default(),
+                })
+                .collect(),
+        };
+        Self::from_config(&config)
     }
 
     pub fn library_names(&self) -> Vec<String> {
-        self.libraries
-            .iter()
-            .map(|l| l.name.clone())
-            .collect()
+        self.libraries.iter().map(|l| l.name.clone()).collect()
     }
 
     /// 对全部库执行 analyze。`force=true` 无条件重扫。
