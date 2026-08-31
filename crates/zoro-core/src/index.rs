@@ -1,14 +1,14 @@
-use crate::model::Entry;
+use crate::model::Block;
 
 /// 四列：title / index / start / path。
 pub const COLUMNS: [&str; 4] = ["title", "index", "start", "path"];
 
 /// 把条目集序列化为四列 TSV（含表头，便于自检）。
-pub fn to_tsv(entries: &[Entry]) -> String {
+pub fn to_tsv(blocks: &[Block]) -> String {
     let mut out = String::new();
     out.push_str(&COLUMNS.join("\t"));
     out.push('\n');
-    for e in entries {
+    for e in blocks {
         out.push_str(&tsv_escape(&e.title));
         out.push('\t');
         out.push_str(&tsv_escape(&e.index_text()));
@@ -29,14 +29,14 @@ fn tsv_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Entry;
+    use crate::model::Block;
     use std::path::PathBuf;
 
     #[test]
     fn renders_header_and_rows() {
-        let e = Entry {
+        let e = Block {
             title: "Hello".into(),
-            index_terms: vec!["alpha".into(), "beta".into()],
+            terms: vec!["alpha".into(), "beta".into()],
             path: PathBuf::from("sub/a.md"),
             start: 3,
             raw: String::new(),

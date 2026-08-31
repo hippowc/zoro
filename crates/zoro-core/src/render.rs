@@ -1,12 +1,12 @@
-use crate::model::Entry;
+use crate::model::Block;
 use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
 
 /// P0 降级路径：返回条目原文。
-pub fn render_raw(entry: &Entry) -> &str {
-    &entry.raw
+pub fn render_raw(block: &Block) -> &str {
+    &block.raw
 }
 
 /// 把 Markdown 渲染为 HTML（P1）。
@@ -134,10 +134,10 @@ mod tests {
 
     #[test]
     fn strips_directives_keeps_fence() {
-        let md = "@index a b\n@cmd\n```bash\necho @not_a_directive\n```\ntext\n";
+        let md = "@index a b\n@shell\n```bash\necho @not_a_directive\n```\ntext\n";
         let out = strip_directives(md);
         assert!(!out.contains("@index"));
-        assert!(!out.contains("@cmd"));
+        assert!(!out.contains("@shell"));
         assert!(out.contains("echo @not_a_directive"));
         assert!(out.contains("```bash"));
         assert!(out.contains("text"));

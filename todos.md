@@ -9,9 +9,10 @@
 - ✅ 已完成（待提交）：`agents.md` v7（Workspace 单一模型 + 库级配置扩展）+ 对应代码改造
 - ✅ 已验证：14 单测 + 4 集成全绿；`zoro.toml` 单库 / 多库手动可用
 - ✅ ZORO_ROOT / ZORO_LIBS 已移除，统一 `ZORO_WORKSPACE` → `./zoro.toml`
-- 当前等价阶段：**P0 完成；P1 完成一半（HTML target 已做，ANSI 未做）**
-- ✅ 设计 v8（已提交 `fd31836`）：新增 Launcher 桌面前端（P3.5，Tauri 2 + nucleo）与 macOS 分发/签名策略；已写入 agents.md
-- ✅ 设计 v9（待提交）：定稿 Action 权限分级 + v1 默认标签集（仅 `@index`/`@cmd`）
+- 当前等价阶段：**P0 完成（v10 统一 Block 模型已落地）；P1 完成一半（HTML target 已做，ANSI 未做）**
+- ✅ 设计 v8（`fd31836`）：新增 Launcher 桌面前端（P3.5，Tauri 2 + nucleo）与 macOS 分发/签名策略
+- ✅ 设计 v9（`ac297f0`）：定稿 Action 权限分级 + v1 默认标签集（仅 `@index`/`@cmd`）
+- ✅ 设计 v10（待提交）：统一标签模型（Block = 标签名 + 搜索词 + 负载）、`@cmd`→`@shell`、manifest schema v2，代码已实施
 
 ## 任务看板
 
@@ -23,7 +24,7 @@
 | 2 | Markdown→ANSI 渲染 target | core | `render_markdown_ansi`：粗体/代码块/标题上色；非 TTY 时 CLI 仍走纯文本；渲染管线多 target 框架落地 |
 | 3 | manifest 脏检查升级为文件级指纹 | core | 当前是“库内任一 md 更新即全量重扫”；改为记录 `(path, mtime, size)` 指纹，最小化重建范围 |
 | 4 | CLI 命令结构明确化 | zoro | 把裸词优先级改为明确子命令（`search/index/serve/html`），避免 `zoro query git` 这类歧义；保留无参进 fzf 的目标 |
-| 5 | 库级配置接入运行时行为 | core+zoro | `default` 库无参打开；`preview` 选择展示 target；`allow_exec` 参与 `@cmd` 执行安全（当前仅解析保留，不生效） |
+| 5 | 库级配置接入运行时行为 | core+zoro | `default` 库无参打开；`preview` 选择展示 target；`allow_exec` 参与 `@shell` 执行安全（当前仅解析保留，不生效） |
 
 ### 二、近期：P2 本地 Web + P3 CLI 前端（两个平级前端）
 
@@ -31,7 +32,7 @@
 |---|------|------|-------------|
 | 6 | `zoro serve` 本地 Web | ext/zoro-server | axum/warp 服务：浏览全量条目、搜索接口、命中渲染；浏览器可用，全程无终端；大众入口 |
 | 7 | CLI + fzf 交互 | zoro | 候选行结构 `title<TAB>index<TAB>library<TAB>path<TAB>start`；`--with-nth` 显示 title，`--nth` 匹配 index；`--preview` 现场截取预览；回车全屏展示 |
-| 8 | `@cmd` 行为（按 v9 Action 分级落地） | core+zoro | core 定义 `Action` trait；CLI 落 `ActionRegistry`：`Copy` 默认、`Execute` 确认、`Insert`（回填）平台可选延后；`Open`/`Preview` 由渲染层按内容类型推断 |
+| 8 | `@shell` 行为（按 v9 Action 分级落地） | core+zoro | core 定义 `Action` trait；CLI 落 `ActionRegistry`：`Copy` 默认、`Execute` 确认、`Insert`（回填）平台可选延后；`Open`/`Preview` 由渲染层按内容类型推断 |
 | 9 | 单二进制捆绑 fzf | zoro | release 资产按平台打包 fzf；新机器零安装可用；缺 fzf 时优雅降级非交互输出 |
 
 ### 三、中期：P3.5 Launcher + P4 全文搜索 + P5 静态站点
@@ -52,7 +53,8 @@
 
 ## 待定回小区（backlog）
 
-- **tag 体系**：先不定 `@tag`；方向候选 = 目录名 tag / 构建期配置 / 库名级过滤（与 Workspace 衔接）。
+- **tag / facet**：v10 已定调——标签名即 facet（`@shell`/`@video`…）；按 facet 过滤的 query 参数待做。
+- **同主题块聚合**：`index` 块与同主题 `shell`/`video` 块命中并排显示的问题，留待 P3 交互前端设计。
 - **稳定条目 id**：当前用 `(library, path, start)` 定位；需要跨编辑引用跳转时再引入内容锚点。
 - **`@card` 等块组件**：语法已设计、渲染注册表未实现；等 Web/桌面 target 需要时再做。
 - **README 同步实现状态**：README 仍偏愿景描述，可在 P2 落地时一并更新。
@@ -62,4 +64,4 @@
 1. 先做 #1 `nucleo` + #2 `ANSI`（core 冻结最后两块，性价比最高）。
 2. 再做 #4 CLI 命令结构（把命令面稳住，为 P3 fzf 铺路）。
 3. 然后 **P2 `zoro serve`** 与 **P3 fzf** 并行；期间抽一个 **P3.5 Launcher 单平台 Spike**（免费、无需开发者账号）尽早验证“全局热键唤起”的体验是否成立。
-4. Launcher 正式三平台 + 回填，等 Spike 结论出来后再排期；GUI 大众分发（Developer ID + 公证）延后到真正大众化阶段；`@cmd` 执行放到 P3 后半段（安全确认机制一起做）。
+4. Launcher 正式三平台 + 回填，等 Spike 结论出来后再排期；GUI 大众分发（Developer ID + 公证）延后到真正大众化阶段；`@shell` 执行放到 P3 后半段（安全确认机制一起做）。

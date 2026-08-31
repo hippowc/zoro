@@ -114,7 +114,7 @@ fn analyze_writes_manifest_and_tsv_view() {
     let manifest = zoro_core::meta::Manifest::from_json(&json).unwrap();
     assert_eq!(manifest.schema, zoro_core::meta::SCHEMA);
     assert_eq!(manifest.library.name, "fixtures");
-    assert_eq!(manifest.entries.len(), 2);
+    assert_eq!(manifest.blocks.len(), 4);
 
     let tsv = fs::read_to_string(lib.index_view_path()).unwrap();
     assert!(tsv.lines().next().unwrap().starts_with("title\tindex\tstart\tpath"));

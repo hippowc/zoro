@@ -63,7 +63,7 @@ pub struct LibraryConfig {
     /// 候选保留：默认预览 target（如 `markdown` / `html`），尚未启用。
     #[serde(default)]
     pub preview: Option<String>,
-    /// 候选保留：是否允许执行 `@cmd`（安全的默认策略是拒绝）。
+    /// 候选保留：是否允许执行 `@shell`（安全的默认策略是拒绝）。
     #[serde(default)]
     pub allow_exec: Option<bool>,
     #[serde(default, flatten)]

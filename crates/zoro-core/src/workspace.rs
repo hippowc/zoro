@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 
 use crate::config::WorkspaceConfig;
 use crate::library::Library;
-use crate::{query, Entry};
+use crate::{query, Block};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// 多库工作区：搜索 / 浏览的默认作用域。
 ///
-/// 条目全局身份 = `(库名, path, start)`；聚合查询时库名作为命名空间前缀。
+/// 块全局身份 = `(库名, path, start)`；聚合查询时库名作为命名空间前缀。
 #[derive(Debug, Clone, Default)]
 pub struct Workspace {
     pub libraries: Vec<Library>,
@@ -79,19 +79,19 @@ impl Workspace {
         out
     }
 
-    /// 按三元组定位库并现场截取条目原文。
+    /// 按三元组定位库并现场截取块原文。
     pub fn load_raw(&self, library: &str, path: &Path, start: usize) -> Result<String> {
         let lib = self
             .libraries
             .iter()
             .find(|l| l.name == library)
             .ok_or_else(|| format!("library not found: {library}"))?;
-        let entry = Entry {
+        let block = Block {
             library: library.to_string(),
             path: path.to_path_buf(),
             start,
             ..Default::default()
         };
-        lib.load_raw(&entry)
+        lib.load_raw(&block)
     }
 }

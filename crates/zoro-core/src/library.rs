@@ -3,19 +3,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::config::LibraryConfig;
-use crate::{index, meta, query, scan, Entry};
+use crate::{index, meta, query, scan, Block};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// 一个知识库：名称 + 内容根 + 库级配置 + 条目。
+/// 一个知识库：名称 + 内容根 + 库级配置 + 内容块。
 ///
-/// 条目三元组身份的 `library` 分量即 `name`。
+/// 块三元组身份的 `library` 分量即 `name`。
 #[derive(Debug, Clone)]
 pub struct Library {
     pub name: String,
     pub root: PathBuf,
     pub config: LibraryConfig,
-    pub entries: Vec<Entry>,
+    pub blocks: Vec<Block>,
 }
 
 impl Library {
@@ -35,7 +35,7 @@ impl Library {
             name: name.to_string(),
             root: root.to_path_buf(),
             config,
-            entries: Vec::new(),
+            blocks: Vec::new(),
         };
         lib.rescan()?;
         Ok(lib)
@@ -51,7 +51,7 @@ impl Library {
             name: name.to_string(),
             root: root.to_path_buf(),
             config,
-            entries: Vec::new(),
+            blocks: Vec::new(),
         };
         lib.analyze(false)?;
         Ok(lib)
@@ -81,22 +81,28 @@ impl Library {
     /// - `force=false`：仅在 stale 时重建，否则直接由 manifest 冷启动。
     pub fn analyze(&mut self, force: bool) -> Result<PathBuf> {
         if force || self.is_stale()? {
-            self.rescan()?;
-            self.write_manifest()?;
-            self.write_index_view()?;
-        } else {
-            self.load_manifest()?;
+            self.rebuild()?;
+        } else if self.load_manifest().is_err() {
+            // manifest 损坏 / schema 升级：自动重建（元数据是派生物，可丢）。
+            self.rebuild()?;
         }
         Ok(self.meta_path())
     }
 
+    fn rebuild(&mut self) -> Result<()> {
+        self.rescan()?;
+        self.write_manifest()?;
+        self.write_index_view()?;
+        Ok(())
+    }
+
     pub fn rescan(&mut self) -> Result<()> {
-        self.entries = scan::scan_dir_named(&self.root, &self.name)?;
+        self.blocks = scan::scan_dir_named(&self.root, &self.name)?;
         Ok(())
     }
 
     fn write_manifest(&self) -> Result<()> {
-        let manifest = meta::Manifest::from_entries(&self.name, &self.root, &self.entries);
+        let manifest = meta::Manifest::from_blocks(&self.name, &self.root, &self.blocks);
         let json = manifest.to_json()?;
         let dst = self.meta_path();
         if let Some(dir) = dst.parent() {
@@ -107,7 +113,7 @@ impl Library {
     }
 
     fn write_index_view(&self) -> Result<()> {
-        atomic_write(&self.index_view_path(), index::to_tsv(&self.entries).as_bytes())?;
+        atomic_write(&self.index_view_path(), index::to_tsv(&self.blocks).as_bytes())?;
         Ok(())
     }
 
@@ -129,18 +135,18 @@ impl Library {
             )
             .into());
         }
-        self.entries = manifest.into_entries(&self.name);
+        self.blocks = manifest.into_blocks(&self.name);
         Ok(())
     }
 
-    /// 现场截取条目原文：按 `(path, start)` 重读源文件并推导边界。
-    pub fn load_raw(&self, entry: &Entry) -> Result<String> {
-        let text = fs::read_to_string(self.root.join(&entry.path))?;
-        Ok(scan::slice_entry(&text, entry.start))
+    /// 现场截取块原文：按 `(path, start)` 重读源文件并推导边界。
+    pub fn load_raw(&self, block: &Block) -> Result<String> {
+        let text = fs::read_to_string(self.root.join(&block.path))?;
+        Ok(scan::slice_block(&text, block.start))
     }
 
     pub fn query(&self, q: &str) -> Vec<query::Candidate> {
-        query::search(&self.entries, &self.name, q)
+        query::search(&self.blocks, &self.name, q)
     }
 }
 

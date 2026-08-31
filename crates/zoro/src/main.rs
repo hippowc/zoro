@@ -27,10 +27,10 @@ fn main() {
             Ok(()) => {
                 for lib in &ws.libraries {
                     println!(
-                        "{}  {}  ({} entries)",
+                        "{}  {}  ({} blocks)",
                         lib.meta_path().display(),
                         lib.name,
-                        lib.entries.len()
+                        lib.blocks.len()
                     );
                 }
             }

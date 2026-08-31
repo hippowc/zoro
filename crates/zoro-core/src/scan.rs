@@ -1,34 +1,35 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{Directive, Entry};
+use crate::model::{Block, ShellBlock, TagKind};
+use crate::registry;
 
-/// 扫描单个 Markdown 文件，按 `@index` 切分成多个条目。
+/// 扫描单个 Markdown 文件，按任意 `@<name>` 标签切分成内容块。
 ///
-/// 返回条目的 `library` 为空串，由 `scan_dir_named` / `Library::open` 填充。
-pub fn scan_file(path: &Path) -> Result<Vec<Entry>, ScanError> {
+/// 返回块的 `library` 为空串，由 `scan_dir_named` / `Library::open` 填充。
+pub fn scan_file(path: &Path) -> Result<Vec<Block>, ScanError> {
     let text = fs::read_to_string(path).map_err(ScanError::Io)?;
     Ok(scan_text(&text, path))
 }
 
 /// 对文本内容执行分块扫描（便于测试直接喂字符串）。
-pub fn scan_text(text: &str, path: &Path) -> Vec<Entry> {
+pub fn scan_text(text: &str, path: &Path) -> Vec<Block> {
     let mut scanner = Scanner::new(path);
     scanner.consume(text);
-    scanner.entries
+    scanner.blocks
 }
 
-/// 从 `start` 行开始，按"条目边界现场推导"截取条目原文。
+/// 从 `start` 行开始，按统一边界现场截取一个块的原文。
 ///
-/// 边界 = `start` 行 → 下一个顶格 `@index` / 文件末尾（与 `scan_text` 一致）。
-pub fn slice_entry(text: &str, start: usize) -> String {
+/// 边界 = `start` 行 → 下一个任意 `@<name>` 标签行 / 文件末尾。
+pub fn slice_block(text: &str, start: usize) -> String {
     let mut out: Vec<&str> = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let no = idx + 1;
         if no < start {
             continue;
         }
-        if no > start && is_directive(line, "index") {
+        if no > start && parse_directive(line).is_some() {
             break;
         }
         out.push(line);
@@ -53,46 +54,68 @@ impl std::error::Error for ScanError {}
 
 struct Scanner<'a> {
     path: &'a Path,
-    entries: Vec<Entry>,
+    blocks: Vec<Block>,
     last_heading: Option<String>,
-    /// `last_heading` 是否仍然"紧贴"下一个 `@index`（中间只允许空行 / 其他 `@` 行）。
+    /// `last_heading` 是否仍然"紧贴"下一个标签（中间只允许空行 / 其他 `@` 行）。
     heading_fresh: bool,
-    cur: Option<CurEntry>,
-    pending_cmd: bool,
+    cur: Option<CurBlock>,
+    /// 是否在等待 `@shell` 的紧随 fence。
+    pending_shell: bool,
 }
 
 #[derive(Default)]
-struct CurEntry {
+struct CurBlock {
     start: usize,
     title: Option<String>,
-    index_terms: Vec<String>,
+    kind: TagKind,
+    terms: Vec<String>,
     lines: Vec<String>,
-    directives: Vec<Directive>,
+    shell: Option<ShellBlock>,
 }
 
 impl<'a> Scanner<'a> {
     fn new(path: &'a Path) -> Self {
         Scanner {
             path,
-            entries: Vec::new(),
+            blocks: Vec::new(),
             last_heading: None,
             heading_fresh: false,
             cur: None,
-            pending_cmd: false,
+            pending_shell: false,
         }
     }
 
     fn consume(&mut self, text: &str) {
-        // fence_kind: Some('`') 或 Some('~')，表示当前正在收集一个属于 @cmd 的 fence。
+        // 正在收集的 `@shell` fence 状态。
         let mut fence_kind: Option<char> = None;
-        let mut cmd_body: Vec<String> = Vec::new();
-        let mut cmd_lines: Vec<usize> = Vec::new();
-        let mut cmd_lang: Option<String> = None;
+        let mut shell_lang: Option<String> = None;
+        let mut shell_lines: Vec<usize> = Vec::new();
 
         for (idx, line) in text.lines().enumerate() {
             let line_no = idx + 1;
 
-            // 1) ## 标题：只记录最近标题，不参与边界。
+            // 0) 正在收集 shell fence：fence 内不解析标签。
+            if let Some(kind) = fence_kind {
+                if is_fence_close(line, kind) {
+                    if let Some(cur) = self.cur.as_mut() {
+                        cur.lines.push(line.to_string());
+                        cur.shell = Some(ShellBlock {
+                            lang: shell_lang.take(),
+                            lines: std::mem::take(&mut shell_lines),
+                        });
+                    }
+                    self.pending_shell = false;
+                    fence_kind = None;
+                } else {
+                    shell_lines.push(line_no);
+                    if let Some(cur) = self.cur.as_mut() {
+                        cur.lines.push(line.to_string());
+                    }
+                }
+                continue;
+            }
+
+            // 1) 标题：只记录最近标题，不参与边界。
             if let Some(rest) = line.strip_prefix("## ") {
                 self.last_heading = Some(rest.trim().to_string());
                 self.heading_fresh = true;
@@ -104,96 +127,61 @@ impl<'a> Scanner<'a> {
                 continue;
             }
 
-            // 2) @index：结束上一条，开新条目。@ 行不破坏标题紧贴性。
-            let index_val = directive_value(line, "index");
-            if let Some(val) = index_val {
+            // 2) 任意 `@<name>` 标签行：结束上一块，开新块。
+            if let Some((name, value)) = parse_directive(line) {
                 self.flush_current();
+                let kind = registry::classify_tag(&name);
                 let title = if self.heading_fresh {
                     self.last_heading.clone().filter(|h| !h.is_empty())
                 } else {
                     None
                 };
-                self.cur = Some(CurEntry {
+                self.pending_shell = kind.is_shell();
+                self.cur = Some(CurBlock {
                     start: line_no,
                     title,
-                    index_terms: split_ws(val),
-                    lines: Vec::new(),
-                    directives: Vec::new(),
+                    kind,
+                    terms: split_ws(&value),
+                    lines: vec![line.to_string()],
+                    shell: None,
                 });
-                if let Some(cur) = self.cur.as_mut() {
-                    cur.lines.push(line.to_string());
-                }
+                // `@` 行不破坏标题紧贴性。
                 continue;
             }
 
-            // 3) @cmd：标记待绑定，不破坏标题紧贴性。
-            if directive_value(line, "cmd").is_some() || is_directive(line, "cmd") {
-                self.pending_cmd = true;
-                if let Some(cur) = self.cur.as_mut() {
-                    cur.lines.push(line.to_string());
-                }
-                continue;
-            }
-
-            // 4) fence 起始：若存在待绑定 @cmd，开始收集其内容。
-            if fence_kind.is_none() {
+            // 3) `@shell` 之后：开始收集紧随的 fence。
+            if self.pending_shell {
                 if let Some(kind) = fence_kind_of(line) {
-                    if self.pending_cmd {
-                        fence_kind = Some(kind);
-                        cmd_lang = fence_lang(line);
-                        cmd_body.clear();
-                        cmd_lines.clear();
-                        if let Some(cur) = self.cur.as_mut() {
-                            cur.lines.push(line.to_string());
-                        }
-                        // fence 正文会破坏标题紧贴性。
-                        self.heading_fresh = false;
-                        continue;
-                    }
-                }
-            }
-
-            // 5) 正在收集 cmd fence 内容。
-            if let Some(kind) = fence_kind {
-                if is_fence_close(line, kind) {
+                    fence_kind = Some(kind);
+                    shell_lang = fence_lang(line);
+                    shell_lines.clear();
                     if let Some(cur) = self.cur.as_mut() {
                         cur.lines.push(line.to_string());
-                        cur.directives.push(Directive::Cmd {
-                            lang: cmd_lang.take(),
-                            body: cmd_body.join("\n"),
-                            lines: std::mem::take(&mut cmd_lines),
-                        });
                     }
-                    self.pending_cmd = false;
-                    fence_kind = None;
-                    cmd_body.clear();
+                    // fence 正文会破坏标题紧贴性。
+                    self.heading_fresh = false;
                     continue;
                 }
-                cmd_body.push(line.to_string());
-                cmd_lines.push(line_no);
-                if let Some(cur) = self.cur.as_mut() {
-                    cur.lines.push(line.to_string());
-                }
-                continue;
             }
 
-            // 6) 其余：正文。
+            // 4) 其余：正文。
             if !line.trim().is_empty() {
-                self.heading_fresh = false; // 正文行破坏标题紧贴性
+                self.heading_fresh = false;
             }
             if let Some(cur) = self.cur.as_mut() {
                 cur.lines.push(line.to_string());
             }
         }
 
-        // 文件结尾：未闭合的 cmd fence 也照常绑定。
-        if let Some(cur) = self.cur.as_mut() {
-            if self.pending_cmd && !cmd_body.is_empty() {
-                cur.directives.push(Directive::Cmd {
-                    lang: cmd_lang.take(),
-                    body: cmd_body.join("\n"),
-                    lines: std::mem::take(&mut cmd_lines),
-                });
+        // 文件结尾：未闭合的 shell fence 也照常绑定。
+        if self.pending_shell {
+            if let Some(cur) = self.cur.as_mut() {
+                if cur.shell.is_none() && !shell_lines.is_empty() {
+                    cur.shell = Some(ShellBlock {
+                        lang: shell_lang.take(),
+                        lines: std::mem::take(&mut shell_lines),
+                    });
+                }
             }
         }
 
@@ -206,36 +194,42 @@ impl<'a> Scanner<'a> {
                 .title
                 .clone()
                 .filter(|h| !h.is_empty())
-                .unwrap_or_else(|| cur.index_terms.first().cloned().unwrap_or_default());
-            self.entries.push(Entry {
+                .unwrap_or_else(|| {
+                    cur.terms
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| cur.kind.as_str())
+                });
+            self.blocks.push(Block {
                 library: String::new(),
                 title,
-                index_terms: std::mem::take(&mut cur.index_terms),
-                tags: Vec::new(),
+                kind: cur.kind,
+                terms: std::mem::take(&mut cur.terms),
                 path: self.path.to_path_buf(),
                 start: cur.start,
                 raw: cur.lines.join("\n"),
-                directives: std::mem::take(&mut cur.directives),
+                shell: cur.shell,
             });
         }
     }
 }
 
-/// 返回 `@name` 行的值（`@index xxx` → `xxx`），或 None。
-fn directive_value<'a>(line: &'a str, name: &str) -> Option<&'a str> {
-    let prefix = format!("@{name}");
-    let rest = line.strip_prefix(&prefix)?;
-    if rest.starts_with(' ') || rest.starts_with('\t') {
-        Some(rest.trim())
-    } else if rest.is_empty() {
-        Some("")
+/// 解析顶格 `@<name> value`，返回 `(name, value)`；不匹配返回 None。
+fn parse_directive(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix('@')?;
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if name.is_empty() {
+        return None;
+    }
+    let after = &rest[name.len()..];
+    if after.is_empty() || after.starts_with(' ') || after.starts_with('\t') {
+        Some((name, after.trim().to_string()))
     } else {
         None
     }
-}
-
-fn is_directive(line: &str, name: &str) -> bool {
-    directive_value(line, name).is_some()
 }
 
 fn split_ws(s: &str) -> Vec<String> {
@@ -274,33 +268,31 @@ fn is_fence_close(line: &str, kind: char) -> bool {
     }
 }
 
-/// 扫描一个内容根目录下所有 `*.md` / `*.mdx`，返回按路径稳定排序的条目。
-///
-/// 返回条目的 `library` 为空；多库时请使用 [`scan_dir_named`]。
-pub fn scan_dir(root: &Path) -> Result<Vec<Entry>, ScanError> {
+/// 扫描一个内容根目录下所有 `*.md` / `*.mdx`，返回按路径稳定排序的块。
+pub fn scan_dir(root: &Path) -> Result<Vec<Block>, ScanError> {
     scan_dir_inner(root, "")
 }
 
-/// 同 [`scan_dir`]，但把每个条目的 `library` 置为给定库名。
-pub fn scan_dir_named(root: &Path, library: &str) -> Result<Vec<Entry>, ScanError> {
+/// 同 [`scan_dir`]，但把每个块的 `library` 置为给定库名。
+pub fn scan_dir_named(root: &Path, library: &str) -> Result<Vec<Block>, ScanError> {
     scan_dir_inner(root, library)
 }
 
-fn scan_dir_inner(root: &Path, library: &str) -> Result<Vec<Entry>, ScanError> {
+fn scan_dir_inner(root: &Path, library: &str) -> Result<Vec<Block>, ScanError> {
     let mut files = Vec::new();
     collect_md(root, &mut files).map_err(ScanError::Io)?;
     files.sort();
 
-    let mut entries = Vec::new();
+    let mut blocks = Vec::new();
     for file in files {
         let rel = file.strip_prefix(root).unwrap_or(&file).to_path_buf();
-        for mut e in scan_file(&file)? {
-            e.path = rel.clone();
-            e.library = library.to_string();
-            entries.push(e);
+        for mut b in scan_file(&file)? {
+            b.path = rel.clone();
+            b.library = library.to_string();
+            blocks.push(b);
         }
     }
-    Ok(entries)
+    Ok(blocks)
 }
 
 fn collect_md(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -331,7 +323,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn splits_two_entries() {
+    fn splits_two_index_blocks() {
         let text = "\
 ## Head
 @index alpha beta
@@ -339,13 +331,13 @@ body one
 @index gamma
 body two
 ";
-        let entries = scan_text(text, Path::new("a.md"));
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].title, "Head");
-        assert_eq!(entries[0].index_terms, vec!["alpha", "beta"]);
-        assert_eq!(entries[0].start, 2);
-        assert_eq!(entries[1].title, "gamma");
-        assert_eq!(entries[1].start, 4);
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].title, "Head");
+        assert_eq!(blocks[0].terms, vec!["alpha", "beta"]);
+        assert_eq!(blocks[0].start, 2);
+        assert_eq!(blocks[1].title, "gamma");
+        assert_eq!(blocks[1].start, 4);
     }
 
     #[test]
@@ -356,60 +348,94 @@ body two
 body
 @index beta
 ";
-        let entries = scan_text(text, Path::new("a.md"));
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].title, "Head");
-        // 第二个 @index 上方隔了正文，标题不再继承，退回 index 首词
-        assert_eq!(entries[1].title, "beta");
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].title, "Head");
+        // 第二个 @index 上方隔了正文，标题不再继承，退回搜索词首词
+        assert_eq!(blocks[1].title, "beta");
     }
 
     #[test]
-    fn binds_cmd_fence() {
+    fn binds_shell_fence() {
         let text = "\
 @index run stuff
-@cmd
+@shell
 ```bash
 echo hi
 echo bye
 ```
 tail
 ";
-        let entries = scan_text(text, Path::new("a.md"));
-        assert_eq!(entries.len(), 1);
-        let e = &entries[0];
-        assert_eq!(e.directives.len(), 1);
-        match &e.directives[0] {
-            Directive::Cmd { lang, body, lines } => {
-                assert_eq!(lang.as_deref(), Some("bash"));
-                assert_eq!(body, "echo hi\necho bye");
-                assert_eq!(lines, &vec![4, 5]);
-            }
-            _ => panic!("expected Cmd"),
-        }
-        assert!(e.raw.contains("echo hi"));
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 2);
+        let b = &blocks[1];
+        assert_eq!(b.kind, TagKind::Shell);
+        let shell = b.shell.as_ref().expect("shell payload");
+        assert_eq!(shell.lang.as_deref(), Some("bash"));
+        assert_eq!(shell.lines, vec![4, 5]);
+        assert!(b.raw.contains("echo hi"));
     }
 
     #[test]
-    fn entry_ends_at_eof() {
+    fn any_tag_ends_previous_block() {
+        let text = "\
+@index alpha
+index body
+@shell git 丢弃
+```bash
+git checkout -- .
+```
+after
+";
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].kind, TagKind::Index);
+        assert!(blocks[0].raw.contains("index body"));
+        assert!(!blocks[0].raw.contains("@shell"));
+        assert_eq!(blocks[1].kind, TagKind::Shell);
+        assert_eq!(blocks[1].terms, vec!["git", "丢弃"]);
+        assert!(blocks[1].raw.contains("after"));
+    }
+
+    #[test]
+    fn unknown_tag_degrades_to_note() {
+        let text = "\
+@index alpha
+body
+@foo bar baz
+payload
+";
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].kind, TagKind::Unknown("foo".to_string()));
+        assert_eq!(blocks[1].terms, vec!["bar", "baz"]);
+        assert!(blocks[1].raw.contains("payload"));
+    }
+
+    #[test]
+    fn block_ends_at_eof() {
         let text = "@index only\nline one\nline two";
-        let entries = scan_text(text, Path::new("a.md"));
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].raw.lines().count(), 3);
+        let blocks = scan_text(text, Path::new("a.md"));
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].raw.lines().count(), 3);
     }
 
     #[test]
-    fn slice_entry_matches_scanner_boundary() {
+    fn slice_block_matches_scanner_boundary() {
         let text = "\
 ## Head
 @index alpha beta
 line one
-@index gamma
-line two
+@shell git
+```bash
+echo hi
+```
 ";
-        // entry start = 2（@index alpha beta 行），到下一个 @index（第 4 行）前结束
-        let sliced = slice_entry(text, 2);
-        assert_eq!(sliced, "@index alpha beta\nline one");
-        // 最后一条到 EOF
-        assert_eq!(slice_entry(text, 4), "@index gamma\nline two");
+        // start = 2（@index alpha beta 行），到下一个标签（第 4 行）前结束
+        assert_eq!(slice_block(text, 2), "@index alpha beta\nline one");
+        // shell 块到 EOF
+        let sliced = slice_block(text, 4);
+        assert!(sliced.starts_with("@shell git"));
+        assert!(sliced.ends_with("```"));
     }
 }

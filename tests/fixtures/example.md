@@ -2,7 +2,7 @@
 
 ## 丢弃本地修改
 @index git checkout reset 丢弃 还原
-@cmd
+@shell
 ```bash
 git checkout -- <file>
 git reset --hard <commit>
@@ -12,7 +12,7 @@ git reset --hard <commit>
 
 ## 资产配置
 @index 定投 止盈 资产配置
-@cmd
+@shell
 ```bash
 echo "invest"
 ```

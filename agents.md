@@ -1,4 +1,4 @@
-# agents.md — zoro 通用知识库框架 · 开发指南（v9 定稿）
+# agents.md — zoro 通用知识库框架 · 开发指南（v10 定稿）
 
 > 本文件是给「后续负责迭代开发的 agent / 人」读的**单一事实源**。
 > 任何 agent 开始本仓库工作前，先读本文件；改动行为前先改本文件。
@@ -11,7 +11,8 @@
 > - v6：单一索引文件 → 版本化元数据（manifest）；单内容根 → 多库工作区。
 > - v7：**统一 Workspace 单一模型**——取消单库/多库两套入口，一律 `zoro.toml` 声明；引入**库级配置扩展**。
 > - v8：新增**桌面前端 Launcher**（全局热键 + 浮窗，Tauri 2 + nucleo 自绘，不用 fzf）与 **macOS 分发/签名策略**。
-> - v9：定稿 **Action 权限分级**（Copy/Open/Preview/Reveal/Execute/Insert）与 **v1 默认标签集**（仅 `@index` + `@cmd`；动作不新增标签）。
+> - v9：定稿 **Action 权限分级**（Copy/Open/Preview/Reveal/Execute/Insert）与 **v1 默认标签集**。
+> - v10：**统一标签模型**——所有标签平级为「块（Block）= 标签名 + 搜索词 + 负载」，`@index` 不再特殊；`@cmd` 改名 `@shell`；manifest schema 升级 v2。
 
 ---
 
@@ -30,10 +31,10 @@
 
 ```
 zoro-core（library，无 UI / 无 fzf / 无网络）
- ├─ 内容模型：Entry / Directive / Library / LibraryConfig / Workspace
+ ├─ 内容模型：Block / TagKind / Registry / Library / LibraryConfig / Workspace
  ├─ 工作区：Workspace ← zoro.toml 声明（库列表 + 库级配置）
- ├─ 分析（analyze）：扫描 @指令、分块 → 库级元数据（manifest）
- ├─ 元数据：库级 manifest（v1：索引视图 + 能力声明）+ mtime 脏检查
+ ├─ 分析（analyze）：扫描 @标签、分块 → 库级元数据（manifest）
+ ├─ 元数据：库级 manifest（v2：块视图 + shell 能力）+ mtime 脏检查
  ├─ 查询：Matcher trait（默认 nucleo）+ 候选模型
  ├─ 渲染：Markdown → AST/HTML/ANSI（多 target）
  └─ trait 扩展点：Render / Action / SyncProvider / Cipher
@@ -48,60 +49,78 @@ zoro-core（library，无 UI / 无 fzf / 无网络）
 
 1. **目录自由，内容受限**：内容目录零约束；唯一技术约束在「`@` 标记行」格式上（§4）。
 2. **Markdown 唯一源**：作者只写 Markdown + `@` 指令（含标签式组件）；HTML/CSS 属于产物与样式层。
-3. **两个技术要素，单行标记（v1）**：`@index`（值型，必须）、`@cmd`（结构型，可选）。
+3. **统一标签模型**：每个标签都是平级的「块（Block）= 标签名（kind）+ 搜索词（terms）+ 负载（raw）」，边界到下一个标签 / EOF；`@index` 只是普通标签之一，不再特殊。
 4. **唯一强制物是库级元数据（manifest）**：版本化、可重建；索引只是它的一个视图。
 5. **Workspace 单一模型**：一律由 `zoro.toml` 声明库集合；单库 = `libraries` 长度为 1，无特殊入口。
-6. **库级身份三元组**：条目身份 = `(库名, path, start)`；库名必须出现在展示路径 / 候选行 / URL 中。
+6. **库级身份三元组**：块身份 = `(库名, path, start)`；库名必须出现在展示路径 / 候选行 / URL 中。
 
-## 4. 条目格式（唯一内容契约 v1）
+## 4. 标签块（Block）格式（唯一内容契约 v2）
+
+### 4.1 统一规则（一条线）
+
+每个标签产出一个内容块，四个要素：
+
+```
+@<name> <search-terms>
+<负载>
+```
+
+- `name`：标签名，直接表意（负载是什么 → 怎么消费）；由注册表（registry）分类为 `TagKind`。
+- `search-terms`：搜索关键词，进检索面（块之间各自独立可命中）。
+- `负载`：紧随标签的内容，消费方式由 `name` 决定。
+- 块边界 = 该标签行 → 下一个任意 `@` 标签行 / EOF。
 
 ```markdown
 ## Git 丢弃本地修改（可读性标题，可选）
 
 @index git checkout reset 丢弃 还原
+`git checkout -- <file>` 会丢弃工作区改动，`reset --hard` 更危险。
 
-@cmd
+@shell git checkout reset 丢弃 还原
 ```bash
 git checkout -- <file>
 git reset --hard <commit>
 ```
 
-正文说明。
+@video 操作演示 丢弃 还原
+./assets/drop-changes.mp4
 ```
 
-### 4.1 指令分三形态（统一标签体系）
+- 上面三个标签是**三个平级块**，各自可被搜索词命中、各自携带负载。
+- `@index` 是"叙述块"（默认正文），`@shell` 是"终端执行块"，`@video` 是"视频块"。
 
-| 形态 | 内容从哪来 | 示例 |
-|------|-----------|------|
-| 值型 | 值本身 | `@index git checkout 丢弃` |
-| 结构型 | 紧随的 Markdown 原生结构（fenced code block） | `@cmd` |
-| 块组件型 | 紧随的 4 空格缩进块 | `@card title=概览` |
+### 4.2 v1 默认标签集（最小集）
 
-### 4.2 `@index`（值型，必须）
+| 标签 | 语义 | 搜索词（值） | 负载 | 消费方式 |
+|------|------|-------------|------|----------|
+| `@index` | 叙述 / 定位 | 主体关键词 | 到下一个标签之间的正文 | 渲染 Markdown |
+| `@shell` | 终端执行 | 命令关键词 | 紧随的 fenced code block | 复制 / 终端执行 |
+| `@video` | 视频 | 视频关键词 | 媒体引用（v1 占位），先按正文存 | 播放（P3.5 起） |
+| `@image` | 图片 | 图片关键词 | 媒体引用（v1 占位），先按正文存 | 显示（P2 起） |
+| 其他 `@xxx` | 未注册 | 保留原词 | 到下一个标签之间的正文 | 降级为普通正文（`unknown:<name>`） |
 
-- 每条条目恰好一条，同时是**条目锚点**和**检索命中面**。
-- 行首顶格 `^@index `，后跟至少一个词。
+- v1 只要求 `@index` + `@shell` 被严谨实现；`@video`/`@image` 在注册表中**占位**，不报错、随正文展示，消费动作后续接入。
+- 未注册标签**安全降级**，不报错、不丢内容。
 
-### 4.3 `@cmd`（结构型，可选）
+### 4.3 `@shell`（终端执行块）
 
-- `@cmd` 后（跳过空行）必须紧跟 fenced code block；块内每行是该 `@cmd` 的负载。
-- 语言取自 fence info string；一个 `@cmd` 绑一个块；无块则**警告并忽略**。
-- v1：`@cmd` 被识别、校验、随正文展示；复制/执行见 §9 Action 扩展点（P3 落地）。
+- `@shell 搜索词` 后（可跳过空行）必须紧跟 fenced code block；fence 内每行就是该块的执行负载。
+- 语言取自 fence info string；`@shell` 的 v1 语义锁定"在终端执行的 shell 命令"，默认语言 shell；非 shell 的 fence 语言按实际 info 记录（暂不改变执行语义）。
+- 一个 `@shell` 绑一个 fence；无 fence 则**按正文块降级**（保留搜索词）。
+- v1：`@shell` 被识别、校验、随正文展示；复制 / 执行见 §9 Action 扩展点（P3 落地）。
 
 ### 4.4 边界规则（现场推导，不存 end）
 
-- **条目边界 = `@index` 行 → 下一个 `@index` 行 / 文件末尾**；`##` 不参与边界。
+- 块边界 = 该标签行 → 下一个任意 `@` 标签行 / 文件末尾；`##`、fence 都不单独作为边界。
+- fence 内部的行不是标签（不解析 `@`），直接作为 `@shell` 负载。
 
 ### 4.5 标题（title）规则
 
-- `##` 紧贴 `@index` 上方；索引取"`@index` 向上最近的 `##`"作 `title`；无 `##` 取 `@index` 首词。
+- `##` 紧贴标签上方；取"该标签向上最近的 `##`"作 `title`；无 `##` 取该标签搜索词首词。
 
-### 4.6 v1 默认标签集（最小集）
+### 4.6 新增标签的唯一判据
 
-- 默认**只启用两个**：`@index`（值型，必须）、`@cmd`（结构型，可选）。
-- 其余 `@xxx`（含 `@card`、`@alias` 等占名/未来标签）默认**不启用**：扫描器安全降级，不报错、不编译进 caps。
-- **动作不新增标签**：`Copy`/`Preview`/`Open`/`Reveal` 由正文内容类型在渲染层推断或由运行时决策；`Execute` 由 `@cmd` 声明；`Insert`（回填）只是 `Execute` 的运行时策略。
-- **新增标签的唯一判据**：出现"正文无法自动推断、且会改变消费方式"的语义，才加新标签。
+新标签必须先回答两问：**属于哪个语义域（定位 / 能力 / 呈现 / 偏好），负载怎么取（正文 / fence / 其他结构）**；两者都说不清就不加。登记入口 = `crates/zoro-core/src/registry.rs`。
 
 ## 5. 分析（analyze）与库级元数据（manifest）
 
@@ -111,30 +130,39 @@ git reset --hard <commit>
 - **manifest 是派生物**：可删、可重建、幂等；真相永远在 Markdown + `@` 标签里。`.zoro/` 默认 gitignore，不入库。
 - **需要正文时现场截取**：按 `(库名, path, start)` 截取到边界（边界现场推导）。元数据**不存 end、不存正文副本、不存配置**。
 
-### 5.2 manifest 结构（schema v1）
+### 5.2 manifest 结构（schema v2）
 
 - 文件位置：`<库根>/.zoro/meta.json`（隐藏目录，天然被扫描规则跳过）。
 - **一个库一份**；workspace 的组织关系由 `zoro.toml` 承载，不写进库 manifest。
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "library": { "name": "sanji", "root": "/data/kb/sanji" },
   "generated_at": "1788166910",
-  "entries": [
+  "blocks": [
     {
       "title": "Git 丢弃本地修改",
+      "kind": "index",
       "index": "git checkout reset 丢弃 还原",
       "path": "git/常用操作.md",
-      "start": 3,
-      "caps": { "actions": [ { "kind": "cmd", "lang": "bash", "lines": [6, 7] } ] }
+      "start": 3
+    },
+    {
+      "title": "Git 丢弃本地修改",
+      "kind": "shell",
+      "index": "git checkout reset 丢弃 还原",
+      "path": "git/常用操作.md",
+      "start": 5,
+      "shell": { "lang": "bash", "lines": [7, 8] }
     }
   ]
 }
 ```
 
 - `library.name` 必须与 `zoro.toml` 声明一致（加载时校验）；`root` 仅作记录。
-- `caps`（能力声明）由 `@` 标签编译而来，见 §5.3。
+- `kind` 是标签分类稳定标识（`index` / `shell` / `video` / `image` / `unknown:<name>`）。
+- `shell` 只记录 `@shell` 的 fence 行号与语言，不存命令正文；`@video`/`@image` 暂未引入结构化元数据。
 
 ### 5.3 声明 vs 决策（关键边界）
 
@@ -142,21 +170,22 @@ git reset --hard <commit>
 
 | 来源 | 进哪里 | 示例 |
 |------|--------|------|
-| 文档内 `@` 标签（`@cmd`/未来 `@preview`） | manifest.entries[].caps | 有 bash 块可执行 |
+| 文档内 `@` 标签（`@shell`/未来 `@video`） | manifest.blocks[].kind + shell | 有 bash 块可执行 |
 | 用户/机器偏好（默认库、预览偏好、是否允许执行） | `zoro.toml` 的库级配置 | preview=html、allow_exec=false |
 
 - 库级配置在 `zoro.toml`（§6.3），**永不进 meta.json**：meta 删除重建不得丢失任何配置。
-- 预览方式 / 执行方式的"策略"交给 `Render` / `Action` 注册表（§9）；manifest 里的 `caps` 是"有哪些能力可用"。
+- 预览方式 / 执行方式的"策略"交给 `Render` / `Action` 注册表（§9）；manifest 里的 `kind`/`shell` 是"有什么能力可用"。
 
 ### 5.4 分块算法
 
-逐行扫描；分块单位 = 条目。`@index` 开新条目、`@cmd` 记待绑定、fence 开==绑定、`##` 记最近标题、其余为正文。
+逐行扫描；分块单位 = 标签块。任意 `@<name>` 行开新块并查注册表分类；`@shell` 进入 fence 收集态；`##` 记最近标题；其余为当前块正文。
 
 ### 5.5 生成与失效（预构建 + 脏检查）
 
 - 主产物 `<库根>/.zoro/meta.json`；同时导出可读视图 `<库根>/zoro-index.tsv`（四列，可选分发/调试）。
 - 查询前 mtime 脏检查，变更才重建；v1 可用"库内任一 `*.md` 晚于 meta 即 stale"，后续升级为文件级 fingerprint。
 - 原子写：临时文件 + `mv`。
+- manifest 损坏 / schema 不匹配时**自动重建**（元数据是派生物，可丢）。
 
 ### 5.6 扫描范围
 
@@ -178,7 +207,7 @@ root = "/data/kb/sanji"
 # 库级配置（可选、可扩展）
 [libraries.config]
 preview = "html"          # 未来：默认预览 target
-# allow_exec = false       # 未来：是否允许执行 @cmd
+# allow_exec = false       # 未来：是否允许执行 @shell
 
 [[libraries]]
 name = "robin"
@@ -209,11 +238,14 @@ root = "/data/kb/robin"
 
 ## 7. 检索与匹配（fzf 属于前端，不在 core）
 
-- **core**：`Matcher trait`（默认 `nucleo`）+ 候选模型 `Candidate{ library, title, index, path, start, match_ranges }`。
+- **core**：`Matcher trait`（默认 `nucleo`）+ 候选模型 `Candidate{ library, title, index, path, start, score, match_ranges }`。
+- 检索面 = 每个块的 `search-terms`（合并后作为 `index`）；所有块平级参与匹配。
 - **CLI 前端**：把全量 candidates 交给 **fzf** 交互（fzf 是该前端的默认控件，随前端捆绑）。
 - **Web / Launcher 前端**：调用 `core.query(q)`，自绘输入框/列表/高亮；Launcher 是常驻进程 + 全局热键 + 无边框浮窗，匹配走 nucleo，不用 fzf。
 
 fzf 三分离语义：**匹配字段（index）≠ 显示字段（title）≠ 载荷（(库,path)+start 即时预览）**。
+
+- （已发现，待 P3 处理）同一主题的 `index` 块和 `shell` 块会分别命中，候选可能并排出现；是否聚合成"主题行"留待交互前端设计。
 
 ## 8. 渲染管线与标签组件（多 target）
 
@@ -260,9 +292,9 @@ Markdown 源
 
 - **展示扩展** = 新 binary 依赖 `zoro-core`。
 - **能力扩展** = core 定义 trait：`Action` / `SyncProvider` / `Cipher`。
-- **动态加载暂缓**；执行安全：外部来源 `@cmd` 必须显式确认。
+- **动态加载暂缓**；执行安全：外部来源 `@shell` 必须显式确认。
 
-### 9.1 Action 权限分级（v9 定稿）
+### 9.1 Action 权限分级（v9 定稿，随 v10 更名）
 
 | 动作 | 权限 | 跨平台 | 定位 |
 |------|------|--------|------|
@@ -270,7 +302,7 @@ Markdown 源
 | `Preview` 打开自家渲染视图 | 无 | 一致 | 主力 |
 | `Open` 按内容类型调起系统应用 | 无 | 一致 | 主力 |
 | `Reveal` 在文件管理器显示 | 无 | 一致 | 辅助 |
-| `Execute` 调起终端执行 `@cmd` | 无特殊权限 | 可行 | 可选（需安全确认） |
+| `Execute` 调起终端执行 `@shell` | 无特殊权限 | 可行 | 可选（需安全确认） |
 | `Insert` 回填到前台应用 | macOS 需 Accessibility；Wayland 基本不可行 | 最差 | 平台可选，最后做 |
 
 - 默认只保证 `Copy` + `Preview`/`Open`（三平台一致可用）。
@@ -325,10 +357,10 @@ zoro/                        # 本仓库（框架）
 
 | 阶段 | 交付 | 归属 |
 |------|------|------|
-| P0 | 标签体系：`@index/@cmd/@card` 解析 + analyze 产出 manifest | core |
+| P0 | 标签体系：统一 Block 模型 + 注册表 + analyze 产出 manifest v2 | core |
 | P1 | 渲染管线：Markdown→HTML/ANSI（多 target） | core |
 | P2 | 本地 Web：`zoro serve`（大众入口） | ext/zoro-server |
-| P3 | CLI 前端：fzf 浏览 + `@cmd` 复制/执行（效率入口） | zoro |
+| P3 | CLI 前端：fzf 浏览 + `@shell` 复制/执行（效率入口） | zoro |
 | P3.5 | 桌面 Launcher：全局热键 + 浮窗，先单平台 Spike 验证体验 | ext/zoro-launcher |
 | P4 | 全文搜索 tantivy | core |
 | P5 | 静态站点发布 | ext/zoro-publish |
@@ -340,9 +372,13 @@ zoro/                        # 本仓库（框架）
 
 ## 13. 待定项（backlog）
 
-### tag（重要，方向未定）
+### tag / facet（方向已定，过滤未实现）
 
-暂不实现 `@tag`。候选：目录名=tag / 构建期配置 / 目录级继承 / 库名级过滤。
+标签名即 facet（`@video`/`@image`/`@shell`…）；按 facet 过滤的运行时 query 参数（如 `-t video`）待做。
+
+### 同主题块的聚合（待 P3 前端设计）
+
+`index` 块与同主题 `shell`/`video` 块命中时是否聚合成一行"主题候选"，由交互前端决定。
 
 ### 稳定条目 id（暂缓）
 
@@ -351,6 +387,7 @@ zoro/                        # 本仓库（框架）
 ### 已推翻
 
 - `ZORO_ROOT` / `ZORO_LIBS`：v7 起统一为 `zoro.toml`，单库不设特殊入口。
+- `@cmd`：v10 改名 `@shell`（语义锁定"在终端执行的 shell 命令"）。
 - `@run`：废除（行为外移为运行时扩展点）。
 - `@lang`：可省（fence info string 已带语言）。
 
@@ -377,14 +414,15 @@ zoro/                        # 本仓库（框架）
 - [ ] 相对 `root` 按 `zoro.toml` 所在目录正确解析。
 - [ ] 库级配置：`preview` 等已知键解析；自定义未知键保留、不报错。
 - [ ] `analyze` 幂等：删 `.zoro/` 重建，结果逐字段一致。
-- [ ] manifest 带 `schema`；条目含 `title/index/start/path/caps`；`zoro-index.tsv` 视图四列正确。
-- [ ] 多库：两库同名条目不串库；候选行/展示路径带库名前缀；库名冲突报错。
-- [ ] 连续两条 `@index` 条目展示正确、无粘连；`title` 规则正确；`@cmd` 正确绑定 fence。
-- [ ] 未变更直接读元数据；某 `.md` 更新后自动重建。
+- [ ] manifest 为 schema v2；块含 `title/kind/index/start/path`；`@shell` 块含 `shell.lang/lines`；`zoro-index.tsv` 视图四列正确。
+- [ ] 多库：两库同名块不串库；候选行/展示路径带库名前缀；库名冲突报错。
+- [ ] 统一边界：任意 `@` 标签开新块、结束上一块；fence 内 `@` 不误判为标签；`title` 规则正确。
+- [ ] `@shell` 正确绑定 fence（搜索词 + 语言 + 行号）；无 fence 时按正文块降级。
+- [ ] 未注册标签安全降级为 `unknown:<name>`，不报错、不丢内容。
+- [ ] 未变更直接读元数据；某 `.md` 更新后自动重建；manifest schema 不匹配时自动重建。
 - [ ] 【P3】CLI fzf 候选区显示标题；`--preview` 随选随显；回车全屏展示；无 TTY 可降级。
 - [ ] 【P3】单二进制（捆绑 fzf）在新机器零安装跑通全链路。
 - [ ] `zoro-core` 无 fzf / 无 UI 依赖（`cargo tree` 可验证）。
 - [ ] 【P2】`zoro serve` 在浏览器完成浏览/搜索/渲染，全程无需终端。
 - [ ] 【P3.5】Launcher 单平台 MVP：常驻进程 + 全局热键唤起 + 无边框浮窗 + nucleo 匹配 + 回车复制/打开渲染；无 fzf 依赖。
 - [ ] 【P3.5 后】回填/执行能力平台可选：缺权限或不支持时降级为复制；"复制 + 打开"三平台一致可用。
-- [ ] 默认标签集：扫描器仅启用 `@index`/`@cmd`；其余 `@xxx` 安全降级、不编译进 caps。

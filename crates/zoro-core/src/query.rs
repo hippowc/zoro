@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::model::Entry;
+use crate::model::Block;
 
 /// 一个命中候选（跨库聚合后的统一模型）。
 ///
@@ -82,9 +82,9 @@ pub fn fuzzy_match(query: &str, text: &str) -> Option<(i64, Vec<(usize, usize)>)
 }
 
 /// 在指定库的条目集上执行查询，按分数降序返回。
-pub fn search(entries: &[Entry], library: &str, query: &str) -> Vec<Candidate> {
+pub fn search(blocks: &[Block], library: &str, query: &str) -> Vec<Candidate> {
     let mut out = Vec::new();
-    for e in entries {
+    for e in blocks {
         let text = e.index_text();
         if let Some((score, matches)) = fuzzy_match(query, &text) {
             out.push(Candidate {
@@ -124,9 +124,9 @@ mod tests {
 
     #[test]
     fn search_tags_candidate_with_library() {
-        let e = Entry {
+        let e = Block {
             title: "Git pull".into(),
-            index_terms: vec!["git".into(), "pull".into()],
+            terms: vec!["git".into(), "pull".into()],
             ..Default::default()
         };
         let hits = search(&[e], "my-lib", "gp");

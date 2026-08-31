@@ -1,64 +1,89 @@
 use std::path::PathBuf;
 
-/// 一个被 `@index` 锚定的知识条目。
+/// `@` 标签的语义分类（由 `registry` 统一分类）。
 ///
-/// 条目全局身份 = `(library, path, start)`；`path` 是相对库根的路径，
-/// `start` 是 `@index` 行的 1-based 行号。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Entry {
-    /// 所属知识库名（工作区多库时的命名空间）。
-    pub library: String,
-    /// 可读标题：`##` 文本，或 index 首词兜底。
-    pub title: String,
-    /// `@index` 的关键词列表（命中面）。
-    pub index_terms: Vec<String>,
-    /// 预留：tag（当前恒为空）。
-    pub tags: Vec<String>,
-    /// 源文件相对库根的路径。
-    pub path: PathBuf,
-    /// `@index` 行号（1-based）。展示时从此行截取到边界。
-    pub start: usize,
-    /// 条目原文（从 `@index` 行到边界：下一个 `@index` / EOF）。
-    ///
-    /// 注意：元数据（manifest）不含此字段——它是运行期对象，冷启动时为
-    /// 空串，正文由 `Library::load_raw` 按 `(path, start)` 现场截取。
-    pub raw: String,
-    /// 条目内解析出的指令（不包含 `@index` 本身）。
-    pub directives: Vec<Directive>,
+/// zoro 的统一内容模型：每个标签都产出一个 [`Block`]——
+/// 标签名 = 维度（`kind`），标签值 = 搜索词（`terms`），其后是负载（`raw`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagKind {
+    /// `@index`：正文叙述块（负载 = 到下一个标签之间的 Markdown）。
+    Index,
+    /// `@shell`：在终端执行的 shell 命令块（负载 = 紧随的 fenced code block）。
+    Shell,
+    /// `@video`：视频块（v1 注册表占位；负载先按正文保存）。
+    Video,
+    /// `@image`：图片块（v1 注册表占位；负载先按正文保存）。
+    Image,
+    /// 未注册标签：安全降级为普通正文块（保留原始标签名）。
+    Unknown(String),
 }
 
-impl Entry {
-    /// 用于 fzf 候选行的命中面。
-    pub fn index_text(&self) -> String {
-        self.index_terms.join(" ")
+impl Default for TagKind {
+    fn default() -> Self {
+        TagKind::Index
     }
 }
 
-/// `@` 指令。`@index` 是锚点，单独存于 `Entry::index_terms`。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Directive {
-    Cmd {
-        lang: Option<String>,
-        /// 代码正文（行尾换行保留在行内部，与 fence 内一致）。
-        body: String,
-        /// 代码块内每行在源文件中的 1-based 绝对行号。
-        ///
-        /// 供 manifest 的 `caps.actions[].lines` 使用；执行/复制时按行号
-        /// 精确截取，不必重解析。
-        lines: Vec<usize>,
-    },
-    Unknown {
-        name: String,
-        value: String,
-    },
+impl TagKind {
+    /// manifest / 展示用的稳定标识。
+    pub fn as_str(&self) -> String {
+        match self {
+            TagKind::Index => "index".to_string(),
+            TagKind::Shell => "shell".to_string(),
+            TagKind::Video => "video".to_string(),
+            TagKind::Image => "image".to_string(),
+            TagKind::Unknown(name) => format!("unknown:{name}"),
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "index" => TagKind::Index,
+            "shell" => TagKind::Shell,
+            "video" => TagKind::Video,
+            "image" => TagKind::Image,
+            other => other
+                .strip_prefix("unknown:")
+                .map(|n| TagKind::Unknown(n.to_string()))
+                .unwrap_or_else(|| TagKind::Unknown(other.to_string())),
+        }
+    }
+
+    pub fn is_shell(&self) -> bool {
+        matches!(self, TagKind::Shell)
+    }
 }
 
-impl Directive {
-    /// 该指令进 manifest 时的能力种类；对 manifest 不关心的指令返回 None。
-    pub fn capability_kind(&self) -> Option<&'static str> {
-        match self {
-            Directive::Cmd { .. } => Some("cmd"),
-            Directive::Unknown { .. } => None,
-        }
+/// `@shell` 块的负载元数据。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ShellBlock {
+    pub lang: Option<String>,
+    /// fence 内容每行在源文件中的 1-based 绝对行号（供精确截取 / 执行）。
+    pub lines: Vec<usize>,
+}
+
+/// 统一内容块：zoro 的最小检索 / 展示单元。
+///
+/// 身份 = `(library, path, start)`。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Block {
+    pub library: String,
+    pub title: String,
+    pub kind: TagKind,
+    /// 标签行后的搜索词（检索面）。
+    pub terms: Vec<String>,
+    pub path: PathBuf,
+    /// 标签行的 1-based 行号。
+    pub start: usize,
+    /// 负载原文（从标签行到边界；运行期独有，manifest 不存）。
+    pub raw: String,
+    /// 仅 `@shell`：fence 元数据。
+    pub shell: Option<ShellBlock>,
+}
+
+impl Block {
+    /// 检索面文本。
+    pub fn index_text(&self) -> String {
+        self.terms.join(" ")
     }
 }
