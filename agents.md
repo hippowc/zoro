@@ -1,32 +1,46 @@
-# agents.md — zoro 速查表工具 · 开发指南（v4 定稿）
+# agents.md — zoro 通用知识库框架 · 开发指南（v5 定稿）
 
 > 本文件是给「后续负责迭代开发的 agent / 人」读的**单一事实源**。
 > 任何 agent 开始本仓库工作前，先读本文件；改动行为前先改本文件。
 >
 > 区分两个概念：
-> - **运行时**：零 agent、零网络、纯本地 —— 产品红线。
+> - **运行时**：本地优先；一切网络能力均为可选插件，关掉即纯本地。
 > - **开发期**：欢迎 agent 参与，但必须遵守下文"不改的设计"。
 
 ---
 
-## 1. 定位
+## 1. 定位与愿景
 
-**zoro**：纯本地、零 agent、零网络的通用知识库速查表工具。
+**zoro**：本地优先、可扩展的通用知识库框架。
 
-- 形态：**单二进制**（Rust），用户零额外安装（fzf 随二进制捆绑，见 §6）。
-- 本质：一个**把 Markdown 当作宿主语言的极小注解工具**——`@` 指令内嵌在 `.md` 中，`@index` 声明"条目"，`@cmd` 借用原生的 fenced code block 承载"可执行负载"。
-- 工具与内容分离：本仓库只含工具 + 测试夹具；真实内容在**外部内容库**，通过环境变量 `ZORO_ROOT` 接入。
+- 核心 = 一个 Rust library（`zoro-core`）+ 一个最小 CLI 前端（`zoro`）。
+- 愿景四步走：**工具 → 站点 → 云 → 安全**（见 §11 产品路线图）。
+- 内容源**只有一种**：Markdown（+ `@` 指令）。HTML 是渲染产物，不是源码。
 
-## 2. 三条原则（不可违背）
+## 2. 核心边界（最重要的口径）
 
-1. **目录自由，内容受限**：内容条目目录零约束；唯一技术约束在「`@` 标记行」的格式上（§3）。
-2. **两个技术要素，均以单行标记承载（v1）**：
-   - `@index`（值型）：条目锚点 + 检索命中面，**必须**。
-   - `@cmd`（结构型）：绑定紧随的 fenced code block，**可选**。
-   - tag 为**待定项**（§8），当前不属于内容标记。
-3. **唯一强制物是索引**：一个扁平 TSV，四列 —— `title  index  start  path`（v1 四列；tag 方案确定后再扩展列，见 §8）。
+```
+zoro-core（library，无 UI / 无 fzf / 无网络）
+ ├─ 内容模型：Entry / Directive / Library
+ ├─ 解析：@index/@cmd 标记与分块
+ ├─ 索引：四列 TSV + 全文索引（tantivy）
+ ├─ 查询：Matcher trait（默认 nucleo）+ 候选模型
+ ├─ 渲染：Markdown → AST/HTML/ANSI（多 target）
+ └─ trait 扩展点：Render / Action / SyncProvider / Cipher
+```
 
-## 3. 条目格式（唯一内容契约 v1）
+- **core 不依赖任何 UI**；fzf、Web、桌面、SSG 都是消费 core 的前端。
+- 依赖方向永远单向：`frontend → core`，绝不反向。
+- 能力扩展走 trait；展示扩展 = 新 binary 依赖 `zoro-core`。
+
+## 3. 原则（不可违背）
+
+1. **目录自由，内容受限**：内容目录零约束；唯一技术约束在「`@` 标记行」格式上（§4）。
+2. **Markdown 唯一源**：作者只写 Markdown + `@` 指令 + 自定义 fence；HTML/CSS 属于产物与样式层。
+3. **两个技术要素，单行标记（v1）**：`@index`（值型，必须）、`@cmd`（结构型，可选）。
+4. **唯一强制物是索引**：扁平 TSV，四列 `title index start path`（tag 待定后扩列）。
+
+## 4. 条目格式（唯一内容契约 v1）
 
 ```markdown
 ## Git 丢弃本地修改（可读性标题，可选）
@@ -39,244 +53,190 @@ git checkout -- <file>
 git reset --hard <commit>
 ```
 
-正文说明：什么时候用 checkout、什么时候用 reset。
+正文说明。
 ```
 
-### 3.1 指令分两类
+### 4.1 指令分两类
 
 | 类型 | 语义 | 示例 |
 |------|------|------|
-| **值型指令** | 值自带完整语义（词列表） | `@index git checkout 丢弃` |
-| **结构型指令** | 语义来自紧随的 Markdown 元素 | `@cmd`（绑定下一段 fenced code block） |
+| 值型指令 | 值自带完整语义 | `@index git checkout 丢弃` |
+| 结构型指令 | 语义来自紧随的 Markdown 元素 | `@cmd`（绑定下一段 fenced code block） |
 
-要扩展就加指令；要承载内容就借 Markdown 结构。**指令不承载冗余内容**（命令只写在代码块里一次）。
+### 4.2 `@index`（值型，必须）
 
-### 3.2 `@index`（值型，必须）
+- 每条条目恰好一条，同时是**条目锚点**和**检索命中面**。
+- 行首顶格 `^@index `，后跟至少一个词。
 
-- 形如 `@index 空格分隔的关键词`。
-- **每条条目恰好一条，必须显式存在**，同时是：
-  - **条目锚点**（起点）
-  - **检索命中面**（fzf 唯一匹配文本）
-- 行首顶格 `@index`，后面跟至少一个词；缩进的 `@` 不是标记。
-- 扫描正则：行首 `^@index `。
+### 4.3 `@cmd`（结构型，可选）
 
-### 3.3 `@cmd`（结构型，可选）
+- `@cmd` 后（跳过空行）必须紧跟 fenced code block；块内每行是该 `@cmd` 的负载。
+- 语言取自 fence info string；一个 `@cmd` 绑一个块；无块则**警告并忽略**。
+- v1：`@cmd` 被识别、校验、随正文展示，不提供复制/执行（§11 P2）。
 
-- `@cmd` 行之后，跳过空行，必须紧跟一个 fenced code block（```` ```lang ````）。
-- **块内每一行是该 `@cmd` 的负载**；语言直接取自 fence 的 info string（`bash`），无需重复声明。
-- 一个 `@cmd` 绑定一个块；多个命令块就写多个 `@cmd`。
-- `@cmd` 后没有紧跟代码块 → 构建时**警告并忽略**，不崩溃。
-- v1：`@cmd` 被识别、校验，块随条目正文展示；**不提供复制/执行**（§5.6，v2）。
+### 4.4 边界规则（现场推导，不存 end）
 
-### 3.4 边界规则（现场推导，不存 end）
+- **条目边界 = `@index` 行 → 下一个 `@index` 行 / 文件末尾**；`##` 不参与边界。
 
-- **条目边界 = `@index` 行 → 下一个 `@index` 行 / 文件末尾**。
-- 展示时按 `path` + `start` 现场截取，不记录 `end`。
-- `##` 不参与边界，只承担"可读标题"职责。
+### 4.5 标题（title）规则
 
-### 3.5 标题（title）规则
+- `##` 紧贴 `@index` 上方；索引取"`@index` 向上最近的 `##`"作 `title`；无 `##` 取 `@index` 首词。
 
-- `##` 标题**紧贴在 `@index` 上方**（中间仅允许空行 / 其他 `@` 指令行）。
-- 构建索引时取"`@index` 向上最近的 `##`"作为 `title`。
-- 无 `##` 时，`title` 取 `@index` 的首个词兜底。
+## 5. 索引（唯一强制物）
 
-### 3.6 正文规则
+**四列 TSV：`title index start path`**（字段约束同 v4：单行、不含 `\t`）。
 
-- 正文自由，但**正文行以顶格 `@` 开头时会被误认**：需要时请缩进该行，或放入代码块。
+### 5.1 分块算法
 
-## 4. 索引（唯一强制物）
+逐行扫描；分块单位 = 条目。`@index` 开新条目、`@cmd` 记待绑定、fence 开==绑定、`##` 记最近标题、其余为正文。
 
-**四列 TSV，入库随内容库分发：**
+### 5.2 生成与失效（预构建 + 脏检查）
 
-```
-title    index    start    path
-```
+- 内容根下 `zoro-index.tsv`（随内容库分发）；查询前 mtime 脏检查，变更才重建。
+- 原子写：临时文件 + `mv`。
 
-| 列     | 说明 |
-|--------|------|
-| `title`| 可读标题（§3.5）；单行、不得含 `\t`。 |
-| `index`| `@index` 值；单行、不得含 `\t`。 |
-| `start`| `@index` 行在源文件内的 1-based 行号。 |
-| `path` | 相对内容根的源文件路径。 |
+### 5.3 扫描范围
 
-### 4.1 分块算法（build-index）
+- 单内容根 `ZORO_ROOT`；只扫 `*.md` / `*.mdx`；跳过隐藏目录；多根为 future。
 
-逐行扫描每个文件。**分块单位 = 条目，不是文件**；一个文件可切成 N 条。
+## 6. 检索与匹配（fzf 属于前端，不在 core）
+
+- **core**：`Matcher trait`（默认 `nucleo`）+ 候选模型 `Candidate{ title, index, path, start, match_ranges }`。
+- **CLI 前端**：把全量 candidates 交给 **fzf** 交互（fzf 是该前端的默认控件，随前端捆绑）。
+- **Web/桌面前端**：调用 `core.query(q)`，自绘输入框/列表/高亮，不用 fzf。
+
+fzf 三分离语义必须沉淀进 core 模型：**匹配字段（index）≠ 显示字段（title）≠ 载荷（path+start 即时预览）**。CLI 用 fzf 实现它们，桌面端同样按此模型实现。
+
+## 7. 渲染管线与 fence 组件（多 target）
+
+### 7.1 管线
 
 ```
-current = 无            # 当前条目
-last_heading = 无        # 最近一次遇到的 ## 行
-pending_cmd = 无         # 待绑定的 @cmd
-
-for 每一行:
-    if 匹配 ^##:         last_heading = 本行; continue
-    if 匹配 ^@index:     结束上一条目；开新条目：
-                         start = 本行号
-                         index = 值
-                         title锚 = last_heading
-                         continue
-    if 匹配 ^@cmd 且 current 存在:  记录 pending_cmd（本行）; continue
-    if fence 开始(``` 或 ~~~) 且 pending_cmd:
-                         该 fence 块 = pending_cmd 的负载；绑定完成; continue
-    # 其余行（含未知 @xxx）视为当前条目正文
+Markdown 源
+ ├─ 预处理：剥离 @指令（进索引，不进 AST）
+ ├─ pulldown-cmark 解析 → 事件流
+ │   ├─ 普通块 → 标准 HTML
+ │   ├─ fence + 已知语言 → syntect 高亮
+ │   ├─ fence + mermaid/KaTeX → 前端渲染容器
+ │   ├─ fence + zoro-* → 组件注册表 → 自定义 HTML
+ │   └─ raw HTML → sanitizer → 放行
+ └─ 输出 target：
+     ├─ Web/桌面/SSG → HTML 文档
+     ├─ CLI/TUI → ANSI
+     └─ 非 TTY → 纯文本
 ```
 
-- 边界：每个条目 = 它的 `@index` → 下一个 `@index` / EOF。
-- 产出：一条记录写入 `zoro-index.tsv`；`title` = `title锚` 文本，无则 `index` 首词。
-- v1 的 `@cmd` 不在四列中新增字段：其负载随条目正文展示，执行比 v2 再取。
+### 7.2 fence 组件协议（自定义结构，不换源）
 
-### 4.2 生成与失效策略（预构建 + 脏检查，非"每次重建"）
-
-- 默认索引文件：内容根下的 `zoro-index.tsv`（随内容库分发、可提交）。
-- 查询前做毫秒级脏检查，满足全部条件则直接用现成索引：
-  - `zoro-index.tsv` 存在；
-  - 内容根内没有比它更新的 `*.md` / `*.mdx`（`find "$ZORO_ROOT" -name '*.md' -newer zoro-index.tsv -print -quit` 为空）。
-- 检测到变更才重建；索引永远是**派生物**、随时可重建。
-- 写入必须**原子化**：先写临时文件再 `mv`。
-
-### 4.3 扫描范围（工具 ≠ 内容）
-
-- 第一版：**单内容根**，环境变量 `ZORO_ROOT` 指定；本仓库不放真实速查条目。
-- 只扫 `*.md` / `*.mdx`；跳过隐藏目录（`.git` 等）。
-- 多内容根为 future work；`path` 以"相对内容根"存储，保证分发后仍可定位。
-
-## 5. 检索链路（`zoro` 命令）
-
-### 5.1 CLI（v1）
-
-```bash
-zoro [初始query]
+```markdown
+```zoro-card
+title: 概览
+size: large
+```
+组件正文（可继续是 Markdown）。
+```
 ```
 
-- `[初始query]`：进入 fzf 的**预填**，不是过滤；进去后可退格/清空/改词。
-- 无参数 = 全量进入 fzf。
-- v1 不做 tag 过滤（§8 待定）。
+- fence info string 为 `zoro-*` 的名字 = 组件类型；fence 内首段 `key: value` 为 props，其后为正文。
+- 渲染器维护**组件注册表**；未知 `zoro-*` 或未知语言 → 一律当普通代码块高亮（安全降级、前向兼容）。
+- 声明层（Markdown）与呈现层解耦：同一个 `zoro-card`，CLI 渲染成框线，Web 渲染成 Tailwind 卡片，桌面渲染成 React 组件。组件可用任意前端框架（React/Vue/Svelte）+ CSS 框架（Tailwind 等）实现，属于**呈现层自由**。
 
-### 5.2 固定管线（顺序不可改）
+### 7.3 样式与内嵌 HTML
 
-1. **脏检查**：§4.2 判定索引是否新鲜，否则重建。
-2. **fzf 交互**：候选行结构 + 显示/匹配分离（§5.3），`--preview` 实时预览。
-3. **确定展示**：回车后 clear fzf，按 `path` + `start` 截取条目（§3.4），高亮展示。
+- 样式 100% 由 CSS 主题层决定（HTML 产物 + CSS 无上限），与源码无关。
+- 一次性样式可用 Markdown 内嵌 HTML（`<details>` 等），但必须过 **sanitizer**（白名单标签/属性）。
+- 内容为不可信输入（云同步/他人分享）时，关 raw HTML 透传或严格 sanitize，防 XSS。
 
-### 5.3 fzf 显示 / 匹配分离（关键）
+## 8. 扩展机制
 
-候选行是**结构行**（tab 分隔）：
+- **展示扩展** = 新 binary 依赖 `zoro-core`（无插件系统）。
+- **能力扩展** = core 定义 trait：`Action` / `SyncProvider` / `Cipher`；内置最小实现，第三方按 crate 加。
+- **动态加载（libloading/wasmtime）暂缓**：无第三方不开源场景前不做。
+- 执行安全：来自外部库的 `@cmd` 执行必须显式确认；打开/编辑/执行均为 `ActionRegistry` 分发。
 
-```
-title<TAB>index<TAB>path<TAB>start
-```
-
-- `--with-nth=1`：**显示**第 1 列（可读标题）。
-- `--nth=2`：**匹配**第 2 列（index）。
-- 效果：用户看到标题、敲的是 index。`--delimiter` 用 `\t`。
-
-### 5.4 --preview（必备）
-
-- `--preview-window=right,60%,wrap`。
-- 预览脚本解析候选行的 `path` + `start`，现场截取该条目（至下一个 `@index`/EOF）。
-- 回车后再做一次完整全屏展示（preview 只是预览，最终展示独立执行）。
-
-### 5.5 非 TTY 降级
-
-- 启动时检测 stdin 是否 TTY：
-  - 有 TTY：正常 fzf 交互。
-  - 无 TTY（管道 / CI / cron / ssh 无 -t）：退出交互，按顺序输出所有命中条目正文到 stdout，保证 `zoro | less` 可用。
-
-### 5.6 行为扩展点（v2；标记层零感知）
-
-"纯展示 / 复制 / 执行"**不属于标记语义**，而是运行时的行为层：
-
-| 触发 | 行为 | 版本 |
-|------|------|------|
-| `Enter` | 展示条目全文（默认） | v1 |
-| `Ctrl+Y`（copy） | 复制当前条目 `@cmd` 块负载 | v2 |
-| `Ctrl+R`（run） | 执行 `@cmd` 块（占位符先填充），回显输出 | v2 |
-
-- 内容作者只声明"是什么"（`@cmd`），行为由工具按模式/按键决定"怎么做"。
-- 多 `@cmd` 时：preview 列出命令块，copy/run 前先选块（v2 细节）。
-- 由此废除 `@run` 指令（不再需要区分"可执行"）。
-
-## 6. 技术实现（单二进制目标）
-
-- **语言/形态**：Rust，产出单二进制。
-- **fzf**：**捆绑原版 fzf 二进制**（`include_bytes!`/embed，运行时释放到临时目录执行），用户无需安装；备选 `skim` 库。
-- **高亮**：优先内嵌 `syntect`（免外部 bat）；退化外部 `bat` → `cat`。
-- **扫描/分块**：标准库逐行读取即可，不依赖 `rg`/`grep`。
-- **发布**：按平台矩阵（linux/mac × amd64/arm64）产出单文件；fzf 为 MIT 协议，可随包分发。
-- 原 Shell 方案（sh+awk+fzf）作废，不再维护。
-
-## 7. 目录布局
+## 9. 目录布局（workspace）
 
 ```
 zoro/
-├── Cargo.toml
+├── Cargo.toml              # workspace
+├── crates/
+│   ├── zoro-core/          # library：模型/解析/索引/查询/渲染管线/trait
+│   └── zoro/               # thin CLI frontend（捆绑 fzf）
+├── ext/                    # 扩展（可独立 repo 或本仓库 workspace）
+│   ├── zoro-server/        # P4 本地 Web
+│   ├── zoro-desktop/       # Tauri 桌面壳
+│   └── zoro-publish/       # P5 静态站点导出
+├── assets/fzf-<platform>   # 仅 CLI 前端捆绑
+├── tests/fixtures/
 ├── README.md
-├── agents.md              # 本文件（开发事实源）
-├── src/
-│   ├── main.rs            # CLI 入口、参数解析、非 TTY 分流
-│   ├── scan.rs            # 扫描 @index/@cmd、分块、生成索引
-│   ├── fzf.rs             # 捆绑 fzf 的释放与调度
-│   └── show.rs            # 边界截取 + 高亮展示
-├── assets/
-│   └── fzf-<platform>     # 捆绑的 fzf 二进制（按发布矩阵）
-└── tests/
-    └── fixtures/          # 最小验收夹具（条目 .md + 断言）
+└── agents.md
 ```
 
-> 本仓库**不放真实速查条目**；测试夹具在 `tests/fixtures/`，真实内容库在仓库外经 `ZORO_ROOT` 接入。
+## 10. 技术选型（Rust 生态）
 
-## 8. 待定项（backlog）
+| 能力 | 选择 |
+|------|------|
+| Markdown 解析 | `pulldown-cmark` + GFM 扩展 |
+| 语法高亮 | `syntect` |
+| 核心模糊匹配 | `nucleo`（纯 matcher） |
+| CLI 交互 | `fzf`（前端捆绑，不进 core） |
+| 全文搜索 | `tantivy`（P3） |
+| 本地 Web | `axum`/`warp`（P4，ext） |
+| 桌面壳 | `tauri`（ext） |
+| 站点搜索 | `pagefind`（P5，ext） |
+| 同步 | git 首发，再 `object_store`/WebDAV（P6，ext） |
+| 加密 | `age`/`rage`（P7，ext） |
+
+## 11. 产品路线图（归属标注）
+
+| 阶段 | 交付 | 归属 |
+|------|------|------|
+| P0 | `@index/@cmd` 解析 + 索引 + CLI fzf 浏览 | core + CLI |
+| P1 | Markdown→HTML/ANSI 渲染管线 | core |
+| P2 | Action 分发（编辑/执行/打开，`@cmd` 复制/执行） | core + CLI |
+| P3 | tantivy 全文搜索 | core |
+| P4 | `zoro serve` 本地 Web | ext/zoro-server |
+| P5 | 静态站点发布 | ext/zoro-publish |
+| P6 | 同步插件（git 首发） | core trait + ext |
+| P7 | age 整库加密 + 密钥授权 | core trait + ext |
+
+核心到 P3 后冻结，P4 起只加 trait、不往 core 塞 UI。
+
+## 12. 待定项（backlog）
 
 ### tag（重要，方向未定）
 
-暂不作为内容标记（**不实现 `@tag`**）。初步判断：tag 是比 index 更大的"范围"概念，不应由每条正文声明，候选方案：
-
-1. **目录名 = tag**（零标注，构建期自动从 path 推导）；
-2. **构建期配置**（内容根下配置文件 / `ZORO_TAGS` 环境变量）；
-3. 目录级 vs 文件级的作用域继承。
-
-待定后，索引表可能从四列扩为五列（`tags` 列或引入侧表），**不影响既有数据**。
+暂不实现 `@tag`。初步判断 tag 是"范围"概念，不属于正文，候选：目录名=tag / 构建期配置 / 目录级继承。确定后索引四列可扩五列，不影响既有数据。
 
 ### 已推翻 / 可省
 
-- `@run`：废除（行为外移，§5.6）。
+- `@run`：废除（行为外移为运行时扩展点）。
 - `@lang`：可省（fence info string 已带语言）。
 
-### 其他扩展指令（占名，不实现）
+### 扩展指令占名（不实现）
 
-`@alias`（别名）、`@desc`（摘要候选）、`@ref`（跳转）、`@hidden`（不进索引）。
+`@alias`（别名）、`@desc`（摘要）、`@ref`（跳转）、`@hidden`（不进索引）。
 
-## 9. 开发路线图（按依赖顺序，逐步验收）
+## 13. 开发约定
 
-1. **cargo 起步 + 单条目分块手测**：`scan.rs` 读文件、识别 `@index`，证明「start 截到下一个 `@index`/EOF」边界正确（连续两条目、条目到 EOF）。
-2. **索引生成**：四列 TSV + 原子写；`title` 向上取 `##`、无则 index 首词；路径含空格等边界。
-3. **`@cmd` 识别与校验**：`@cmd` ↔ 紧随 fence 块的绑定；无 fence 时警告忽略。
-4. **脏检查**：`ZORO_ROOT` 下 mtime 判定 + 按需重建。
-5. **捆绑 fzf + 接线**：释放 fzf、结构候选行（`--with-nth=1` 显示 title / `--nth=2` 匹配 index）、回车回查。
-6. **--preview + 确定展示**：preview 现场截取；回车后全屏展示（syntect/bat→cat）。
-7. **非 TTY 降级**：无 TTY 分支 + 顺序全量输出。
-8. **发布矩阵（v1）**：平台矩阵打包单二进制（捆绑 fzf）。
-9. **行为扩展点（v2）**：`Ctrl+Y` 复制、`Ctrl+R` 执行 + 占位符填充。
+- **不改设计**：§2–§8 的改动都是设计变更，先改本文件再动代码。
+- **本地优先**：关掉网络/云/发布能力 = 纯本地工具；任何网络能力都是可选插件。
+- **性能目标**：未变更进入交互延迟近零；变更重建百毫秒级（千级条目）。
+- **索引是派生物**：随时可重建，但作为分发产物入库。
+- **前向兼容**：未知顶格 `@xxx` 不报错、不影响分块；未知 fence 语言当普通代码块。
+- **安全默认拒绝**：外部来源内容默认不执行、sanitize、显式确认。
+- **不把标记变成编程语言**：指令只做分类/声明，逻辑交给运行时扩展点。
+- **测试轻量**：Rust `tests/` + 文本夹具，不引入额外框架。
 
-## 10. 开发约定
-
-- **不改设计**：§2/§3/§4/§5 的改动都是设计变更，先改 `agents.md` 再动代码。
-- **运行时三零**：查询路径不允许任何 agent 调用、任何网络请求、任何数据库。
-- **性能目标**：未变更时进入 fzf 延迟近零；变更重建控制在百毫秒级（千级条目内）。
-- **索引是派生物**：随时可重建，但作为分发产物入库；提交前保证它干净（内容根已无更新）。
-- **前向兼容**：未知的顶格 `@xxx` 行不报错、不影响分块（视为正文），这是标记体系可扩展的前提。
-- **不把标记变成编程语言**：指令只做"分类/声明"，不承载逻辑；行为一律交给运行时扩展点。新增指令前先过：能否用既有指令 + Markdown 结构表达？
-- **测试轻量**：纯 Rust `tests/` + 文本夹具，不引入额外框架。
-
-## 11. 验收标准（v1）
+## 14. 验收标准（P0）
 
 - [ ] `zoro` 无参进入 fzf 全量浏览；候选区显示标题。
-- [ ] `zoro 初始词` 预填 query，进入后可改写/清空。
-- [ ] 连续两条 `@index` 条目各显示正确、无粘连；条目到 EOF 不越界不丢尾。
-- [ ] `title` 正常解析：有 `##` 取 `##`，无 `##` 取 index 首词。
-- [ ] `@cmd` 紧跟 fence 块正确绑定；多个 `@cmd` 各绑各的；无 fence 时警告忽略、不崩溃。
-- [ ] 内容未变：直接读 `zoro-index.tsv`，不重建；某 `.md` 更新后自动重建。
-- [ ] 缺 bat 时自动降级 cat；无 TTY 时输出全部命中且 `zoro | less` 可用。
-- [ ] `--preview` 随选随显；回车后全屏展示不卡分页。
-- [ ] 单二进制 + 捆绑 fzf：在新机器上无需安装任何依赖即可跑通全链路。
-- [ ] 从零克隆 → 设 `ZORO_ROOT` 指向外部内容库 → `zoro` 全链路可用。
+- [ ] `zoro 初始词` 预填 query，可改写/清空。
+- [ ] 连续两条 `@index` 条目展示正确、无粘连；条目到 EOF 不越界。
+- [ ] `title`：有 `##` 取 `##`，无则取 index 首词。
+- [ ] `@cmd` 正确绑定紧随 fence；无 fence 警告忽略、不崩溃。
+- [ ] 未变更直接读索引；某 `.md` 更新后自动重建。
+- [ ] CLI 缺 fzf（未捆绑场景）报错或走非交互输出；无 TTY 时 `zoro | less` 可用。
+- [ ] `--preview` 随选随显；回车全屏展示。
+- [ ] 单二进制（捆绑 fzf）在新机器零安装跑通全链路。
+- [ ] `zoro-core` 无 fzf / 无 UI 依赖（`cargo tree` 可验证）。
