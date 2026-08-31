@@ -36,7 +36,7 @@ zoro-core（library，无 UI / 无 fzf / 无网络）
 ## 3. 原则（不可违背）
 
 1. **目录自由，内容受限**：内容目录零约束；唯一技术约束在「`@` 标记行」格式上（§4）。
-2. **Markdown 唯一源**：作者只写 Markdown + `@` 指令 + 自定义 fence；HTML/CSS 属于产物与样式层。
+2. **Markdown 唯一源**：作者只写 Markdown + `@` 指令（含标签式组件）；HTML/CSS 属于产物与样式层。
 3. **两个技术要素，单行标记（v1）**：`@index`（值型，必须）、`@cmd`（结构型，可选）。
 4. **唯一强制物是索引**：扁平 TSV，四列 `title index start path`（tag 待定后扩列）。
 
@@ -56,12 +56,13 @@ git reset --hard <commit>
 正文说明。
 ```
 
-### 4.1 指令分两类
+### 4.1 指令分三形态（统一标签体系）
 
-| 类型 | 语义 | 示例 |
-|------|------|------|
-| 值型指令 | 值自带完整语义 | `@index git checkout 丢弃` |
-| 结构型指令 | 语义来自紧随的 Markdown 元素 | `@cmd`（绑定下一段 fenced code block） |
+| 形态 | 内容从哪来 | 示例 |
+|------|-----------|------|
+| 值型 | 值本身 | `@index git checkout 丢弃` |
+| 结构型 | 紧随的 Markdown 原生结构（fenced code block） | `@cmd` |
+| 块组件型 | 紧随的 4 空格缩进块 | `@card title=概览` |
 
 ### 4.2 `@index`（值型，必须）
 
@@ -107,7 +108,7 @@ git reset --hard <commit>
 
 fzf 三分离语义必须沉淀进 core 模型：**匹配字段（index）≠ 显示字段（title）≠ 载荷（path+start 即时预览）**。CLI 用 fzf 实现它们，桌面端同样按此模型实现。
 
-## 7. 渲染管线与 fence 组件（多 target）
+## 7. 渲染管线与标签组件（多 target）
 
 ### 7.1 管线
 
@@ -118,7 +119,7 @@ Markdown 源
  │   ├─ 普通块 → 标准 HTML
  │   ├─ fence + 已知语言 → syntect 高亮
  │   ├─ fence + mermaid/KaTeX → 前端渲染容器
- │   ├─ fence + zoro-* → 组件注册表 → 自定义 HTML
+ │   ├─ 标签组件(@card 等) → 组件注册表 → 自定义 HTML
  │   └─ raw HTML → sanitizer → 放行
  └─ 输出 target：
      ├─ Web/桌面/SSG → HTML 文档
@@ -126,20 +127,18 @@ Markdown 源
      └─ 非 TTY → 纯文本
 ```
 
-### 7.2 fence 组件协议（自定义结构，不换源）
+### 7.2 标签式组件（统一 `@` 语法，不换源）
 
 ```markdown
-```zoro-card
-title: 概览
-size: large
-```
-组件正文（可继续是 Markdown）。
-```
+@card title=概览 size=large
+    组件正文（可继续是 Markdown），
+    用 4 空格缩进承载。
 ```
 
-- fence info string 为 `zoro-*` 的名字 = 组件类型；fence 内首段 `key: value` 为 props，其后为正文。
-- 渲染器维护**组件注册表**；未知 `zoro-*` 或未知语言 → 一律当普通代码块高亮（安全降级、前向兼容）。
-- 声明层（Markdown）与呈现层解耦：同一个 `zoro-card`，CLI 渲染成框线，Web 渲染成 Tailwind 卡片，桌面渲染成 React 组件。组件可用任意前端框架（React/Vue/Svelte）+ CSS 框架（Tailwind 等）实现，属于**呈现层自由**。
+- 行首 `@name key=value...` 为组件声明：`@name` 是组件类型，`key=value` 为 props；**组件正文 = 紧随的 4 空格缩进块**。
+- 渲染器维护**组件注册表**；未知组件名**安全降级**：内容原样保留、不渲染成组件（前向兼容）。
+- 声明层（Markdown）与呈现层解耦：同一个 `@card`，CLI 渲染成框线，Web 渲染成 Tailwind 卡片，桌面渲染成 React 组件。组件可用任意前端框架（React/Vue/Svelte）+ CSS 框架（Tailwind 等）实现，属于**呈现层自由**。
+- fenced code block 三反引号回归唯一职责：**表示真代码**（`@cmd` 绑的就是它）。
 
 ### 7.3 样式与内嵌 HTML
 
@@ -243,7 +242,7 @@ zoro/
 - **本地优先**：关掉网络/云/发布能力 = 纯本地工具；任何网络能力都是可选插件。
 - **性能目标**：未变更进入交互延迟近零；变更重建百毫秒级（千级条目）。
 - **索引是派生物**：随时可重建，但作为分发产物入库。
-- **前向兼容**：未知顶格 `@xxx` 不报错、不影响分块；未知 fence 语言当普通代码块。
+- **前向兼容**：未知顶格 `@xxx` 不报错、不影响分块；未知组件标签安全降级（内容原样）；未知 fence 语言当普通代码块。
 - **安全默认拒绝**：外部来源内容默认不执行、sanitize、显式确认。
 - **不把标记变成编程语言**：指令只做分类/声明，逻辑交给运行时扩展点。
 - **测试轻量**：Rust `tests/` + 文本夹具，不引入额外框架。
