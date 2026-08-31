@@ -1,4 +1,4 @@
-# agents.md — zoro 通用知识库框架 · 开发指南（v7 定稿）
+# agents.md — zoro 通用知识库框架 · 开发指南（v8 定稿）
 
 > 本文件是给「后续负责迭代开发的 agent / 人」读的**单一事实源**。
 > 任何 agent 开始本仓库工作前，先读本文件；改动行为前先改本文件。
@@ -10,6 +10,7 @@
 > 版本演进：
 > - v6：单一索引文件 → 版本化元数据（manifest）；单内容根 → 多库工作区。
 > - v7：**统一 Workspace 单一模型**——取消单库/多库两套入口，一律 `zoro.toml` 声明；引入**库级配置扩展**。
+> - v8：新增**桌面前端 Launcher**（全局热键 + 浮窗，Tauri 2 + nucleo 自绘，不用 fzf）与 **macOS 分发/签名策略**。
 
 ---
 
@@ -18,7 +19,7 @@
 **zoro**：本地优先、可扩展的通用知识库框架。
 
 - 核心 = 一个 Rust library（`zoro-core`）+ 一个最小 CLI 前端（`zoro`）。
-- **非终端优先**：CLI 与 Web 是平级前端——Web（`zoro serve`）是大众入口，CLI fzf 是效率入口，终端不是唯一形态。
+- **非终端优先**：CLI / Web / Launcher 是三个平级前端——Web（`zoro serve`）是大众入口，CLI fzf 是终端效率入口，Launcher（全局快捷键唤起浮窗）是桌面神速入口，终端不是唯一形态。
 - 愿景四步走：**标签体系 → Web 体验 → 站点/云/安全**（见 §12 产品路线图）。
 - 内容源**只有一种**：Markdown（+ `@` 指令）。HTML 是渲染产物，不是源码。
 - 运行三级流程：**内容（作者写）→ 元数据（analyze 产出）→ 消费（前端只读元数据 + 按需截原文）**。
@@ -37,7 +38,7 @@ zoro-core（library，无 UI / 无 fzf / 无网络）
  └─ trait 扩展点：Render / Action / SyncProvider / Cipher
 ```
 
-- **core 不依赖任何 UI**；fzf、Web、桌面、SSG 都是消费 core 的前端。
+- **core 不依赖任何 UI**；fzf（仅限 CLI）、Web、Launcher、SSG 都是消费 core 的前端；Launcher 用 `nucleo` + 自绘列表，不引入 fzf。
 - 依赖方向永远单向：`frontend → core`，绝不反向。
 - **前端只消费元数据**，不直接扫正文；需要正文时按 `(库名, path, start)` 现场截取。
 - 能力扩展走 trait；展示扩展 = 新 binary 依赖 `zoro-core`。
@@ -202,7 +203,7 @@ root = "/data/kb/robin"
 
 - **core**：`Matcher trait`（默认 `nucleo`）+ 候选模型 `Candidate{ library, title, index, path, start, match_ranges }`。
 - **CLI 前端**：把全量 candidates 交给 **fzf** 交互（fzf 是该前端的默认控件，随前端捆绑）。
-- **Web/桌面前端**：调用 `core.query(q)`，自绘输入框/列表/高亮，不用 fzf。
+- **Web / Launcher 前端**：调用 `core.query(q)`，自绘输入框/列表/高亮；Launcher 是常驻进程 + 全局热键 + 无边框浮窗，匹配走 nucleo，不用 fzf。
 
 fzf 三分离语义：**匹配字段（index）≠ 显示字段（title）≠ 载荷（(库,path)+start 即时预览）**。
 
@@ -261,7 +262,7 @@ zoro/                        # 本仓库（框架）
 ├── crates/
 │   ├── zoro-core/
 │   └── zoro/
-├── ext/                     # zoro-server / zoro-desktop / zoro-publish
+├── ext/                     # zoro-server / zoro-launcher / zoro-publish
 ├── tests/fixtures/
 ├── README.md
 ├── agents.md
@@ -292,7 +293,7 @@ zoro/                        # 本仓库（框架）
 | CLI 交互 | `fzf`（前端捆绑，不进 core） |
 | 全文搜索 | `tantivy`（P4） |
 | 本地 Web | `axum`/`warp`（P2，ext） |
-| 桌面壳 | `tauri`（ext） |
+| 桌面壳 / Launcher | Tauri 2 + `tauri-plugin-global-shortcut`（ext/zoro-launcher）；匹配用 nucleo 自绘，不用 fzf |
 | 站点搜索 | `pagefind`（P5，ext） |
 | 同步 | git 首发，再 `object_store`/WebDAV（P6，ext） |
 | 加密 | `age`/`rage`（P7，ext） |
@@ -305,12 +306,14 @@ zoro/                        # 本仓库（框架）
 | P1 | 渲染管线：Markdown→HTML/ANSI（多 target） | core |
 | P2 | 本地 Web：`zoro serve`（大众入口） | ext/zoro-server |
 | P3 | CLI 前端：fzf 浏览 + `@cmd` 复制/执行（效率入口） | zoro |
+| P3.5 | 桌面 Launcher：全局热键 + 浮窗，先单平台 Spike 验证体验 | ext/zoro-launcher |
 | P4 | 全文搜索 tantivy | core |
 | P5 | 静态站点发布 | ext/zoro-publish |
 | P6 | 同步插件（git 首发） | core trait + ext |
 | P7 | age 整库加密 + 密钥授权 | core trait + ext |
 
 - Workspace 单一模型（`zoro.toml`）与库级配置属当前实际实现载体，随 P0/P1 落地。
+- Launcher 分两步：v1 = 单平台 MVP（常驻 + 热键 + 浮窗 + nucleo 匹配 + 复制/打开渲染，不做回填）；v2 = 三平台 + 动作面板 + 回填（回填受平台限制，见 §14）。
 
 ## 13. 待定项（backlog）
 
@@ -342,6 +345,8 @@ zoro/                        # 本仓库（框架）
 - **前向兼容**：未知 `@xxx`、未知组件、未知 fence 语言均安全降级；`LibraryConfig` 未知键保留不报错。
 - **安全默认拒绝**：外部来源内容默认不执行、sanitize、显式确认。
 - **测试轻量**：Rust `tests/` + 文本夹具。
+- **平台分发策略（macOS 基准）**：开发/自用 = 本地构建 + ad-hoc 签名（免费）；CLI 大众分发 = Homebrew formula（源码编译，绕开 Gatekeeper）；GUI launcher 大众分发 = Developer ID 签名 + 公证（需 Apple Developer $99/年，延后到真正大众化再投入）。
+- **Launcher 权限边界**：全局热键"唤起"通常无需特殊权限；"回填/模拟输入"需 Accessibility、且 Wayland 基本不可行，故按平台可选，默认只保证"复制到剪贴板 + 打开渲染"。
 
 ## 15. 验收标准（P0–P3 按阶段）
 
@@ -357,3 +362,5 @@ zoro/                        # 本仓库（框架）
 - [ ] 【P3】单二进制（捆绑 fzf）在新机器零安装跑通全链路。
 - [ ] `zoro-core` 无 fzf / 无 UI 依赖（`cargo tree` 可验证）。
 - [ ] 【P2】`zoro serve` 在浏览器完成浏览/搜索/渲染，全程无需终端。
+- [ ] 【P3.5】Launcher 单平台 MVP：常驻进程 + 全局热键唤起 + 无边框浮窗 + nucleo 匹配 + 回车复制/打开渲染；无 fzf 依赖。
+- [ ] 【P3.5 后】回填/执行能力平台可选：缺权限或不支持时降级为复制；"复制 + 打开"三平台一致可用。

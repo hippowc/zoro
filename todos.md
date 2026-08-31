@@ -10,6 +10,7 @@
 - ✅ 已验证：14 单测 + 4 集成全绿；`zoro.toml` 单库 / 多库手动可用
 - ✅ ZORO_ROOT / ZORO_LIBS 已移除，统一 `ZORO_WORKSPACE` → `./zoro.toml`
 - 当前等价阶段：**P0 完成；P1 完成一半（HTML target 已做，ANSI 未做）**
+- ✅ 设计 v8（待提交）：新增 Launcher 桌面前端（P3.5，Tauri 2 + nucleo）与 macOS 分发/签名策略，已写入 agents.md
 
 ## 任务看板
 
@@ -32,10 +33,12 @@
 | 8 | `@cmd` 复制/执行 | core+zoro | core 定义 `Action` trait；CLI 落 `ActionRegistry`：复制（默认）、执行（外部来源必须显式确认） |
 | 9 | 单二进制捆绑 fzf | zoro | release 资产按平台打包 fzf；新机器零安装可用；缺 fzf 时优雅降级非交互输出 |
 
-### 三、中期：P4 全文搜索 + P5 静态站点
+### 三、中期：P3.5 Launcher + P4 全文搜索 + P5 静态站点
 
 | # | 任务 | 归属 | 说明 / 验收 |
 |---|------|------|-------------|
+| 9.5 | Launcher 单平台 Spike（先验证形态） | ext/zoro-launcher | Tauri 2 + `tauri-plugin-global-shortcut`：常驻进程 + 全局热键 + 无边框浮窗 + nucleo 自绘列表；动作先只做「复制 + 打开渲染」，不做回填；跑通单个平台（macOS 或 Windows），确认体验是否成立 |
+| 9.6 | Launcher 三平台 + 回填（后续，视 Spike 结论） | ext/zoro-launcher | 回填按平台可选：macOS/Windows 可行，X11 凑合、Wayland 降级；权限引导一并做；GUI 大众分发走 Developer ID + 公证，延后到真正大众化阶段 |
 | 10 | tantivy 全文搜索 | core | index 之外的全文档检索通道；与 `@index` 检索分工（index=精确面，fulltext=兜底面） |
 | 11 | 静态站点发布 | ext/zoro-publish | 把库导出为静态 HTML + 站点搜索（pagefind）；个人站点/分享场景 |
 
@@ -57,5 +60,5 @@
 
 1. 先做 #1 `nucleo` + #2 `ANSI`（core 冻结最后两块，性价比最高）。
 2. 再做 #4 CLI 命令结构（把命令面稳住，为 P3 fzf 铺路）。
-3. 然后 **P2 `zoro serve`**（用户基数大、是定位“非终端优先”的关键一步）与 **P3 fzf** 并行。
-4. `@cmd` 执行放到 P3 后半段（安全确认机制一起做）。
+3. 然后 **P2 `zoro serve`** 与 **P3 fzf** 并行；期间抽一个 **P3.5 Launcher 单平台 Spike**（免费、无需开发者账号）尽早验证“全局热键唤起”的体验是否成立。
+4. Launcher 正式三平台 + 回填，等 Spike 结论出来后再排期；GUI 大众分发（Developer ID + 公证）延后到真正大众化阶段；`@cmd` 执行放到 P3 后半段（安全确认机制一起做）。
