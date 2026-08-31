@@ -1,10 +1,20 @@
+use std::path::PathBuf;
+
 use crate::model::Entry;
 
-/// 一个命中候选：条目 + 分数 + 命中位置（字节区间，相对 index_text）。
+/// 一个命中候选（跨库聚合后的统一模型）。
+///
+/// 三分离语义：命中/匹配字段（`index`）≠ 显示字段（`title`）≠ 载荷
+/// （`(library, path, start)` 现场截取）。
 #[derive(Debug, Clone)]
 pub struct Candidate {
-    pub entry: Entry,
+    pub library: String,
+    pub title: String,
+    pub index: String,
+    pub path: PathBuf,
+    pub start: usize,
     pub score: i64,
+    /// 命中位置（字符区间，相对 `index`）。
     pub matches: Vec<(usize, usize)>,
 }
 
@@ -71,14 +81,18 @@ pub fn fuzzy_match(query: &str, text: &str) -> Option<(i64, Vec<(usize, usize)>)
     Some((score, ranges))
 }
 
-/// 在条目集上执行查询，按分数降序返回。
-pub fn search(entries: &[Entry], query: &str) -> Vec<Candidate> {
+/// 在指定库的条目集上执行查询，按分数降序返回。
+pub fn search(entries: &[Entry], library: &str, query: &str) -> Vec<Candidate> {
     let mut out = Vec::new();
     for e in entries {
         let text = e.index_text();
         if let Some((score, matches)) = fuzzy_match(query, &text) {
             out.push(Candidate {
-                entry: e.clone(),
+                library: library.to_string(),
+                title: e.title.clone(),
+                index: text.clone(),
+                path: e.path.clone(),
+                start: e.start,
                 score,
                 matches,
             });
@@ -106,5 +120,18 @@ mod tests {
     #[test]
     fn case_insensitive() {
         assert!(fuzzy_match("GIT", "git pull").is_some());
+    }
+
+    #[test]
+    fn search_tags_candidate_with_library() {
+        let e = Entry {
+            title: "Git pull".into(),
+            index_terms: vec!["git".into(), "pull".into()],
+            ..Default::default()
+        };
+        let hits = search(&[e], "my-lib", "gp");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].library, "my-lib");
+        assert_eq!(hits[0].title, "Git pull");
     }
 }

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use crate::model::{Directive, Entry};
 
 /// 扫描单个 Markdown 文件，按 `@index` 切分成多个条目。
+///
+/// 返回条目的 `library` 为空串，由 `scan_dir_named` / `Library::open` 填充。
 pub fn scan_file(path: &Path) -> Result<Vec<Entry>, ScanError> {
     let text = fs::read_to_string(path).map_err(ScanError::Io)?;
     Ok(scan_text(&text, path))
@@ -14,6 +16,24 @@ pub fn scan_text(text: &str, path: &Path) -> Vec<Entry> {
     let mut scanner = Scanner::new(path);
     scanner.consume(text);
     scanner.entries
+}
+
+/// 从 `start` 行开始，按"条目边界现场推导"截取条目原文。
+///
+/// 边界 = `start` 行 → 下一个顶格 `@index` / 文件末尾（与 `scan_text` 一致）。
+pub fn slice_entry(text: &str, start: usize) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let no = idx + 1;
+        if no < start {
+            continue;
+        }
+        if no > start && is_directive(line, "index") {
+            break;
+        }
+        out.push(line);
+    }
+    out.join("\n")
 }
 
 #[derive(Debug)]
@@ -66,6 +86,7 @@ impl<'a> Scanner<'a> {
         // fence_kind: Some('`') 或 Some('~')，表示当前正在收集一个属于 @cmd 的 fence。
         let mut fence_kind: Option<char> = None;
         let mut cmd_body: Vec<String> = Vec::new();
+        let mut cmd_lines: Vec<usize> = Vec::new();
         let mut cmd_lang: Option<String> = None;
 
         for (idx, line) in text.lines().enumerate() {
@@ -121,6 +142,7 @@ impl<'a> Scanner<'a> {
                         fence_kind = Some(kind);
                         cmd_lang = fence_lang(line);
                         cmd_body.clear();
+                        cmd_lines.clear();
                         if let Some(cur) = self.cur.as_mut() {
                             cur.lines.push(line.to_string());
                         }
@@ -139,6 +161,7 @@ impl<'a> Scanner<'a> {
                         cur.directives.push(Directive::Cmd {
                             lang: cmd_lang.take(),
                             body: cmd_body.join("\n"),
+                            lines: std::mem::take(&mut cmd_lines),
                         });
                     }
                     self.pending_cmd = false;
@@ -147,6 +170,7 @@ impl<'a> Scanner<'a> {
                     continue;
                 }
                 cmd_body.push(line.to_string());
+                cmd_lines.push(line_no);
                 if let Some(cur) = self.cur.as_mut() {
                     cur.lines.push(line.to_string());
                 }
@@ -168,6 +192,7 @@ impl<'a> Scanner<'a> {
                 cur.directives.push(Directive::Cmd {
                     lang: cmd_lang.take(),
                     body: cmd_body.join("\n"),
+                    lines: std::mem::take(&mut cmd_lines),
                 });
             }
         }
@@ -183,6 +208,7 @@ impl<'a> Scanner<'a> {
                 .filter(|h| !h.is_empty())
                 .unwrap_or_else(|| cur.index_terms.first().cloned().unwrap_or_default());
             self.entries.push(Entry {
+                library: String::new(),
                 title,
                 index_terms: std::mem::take(&mut cur.index_terms),
                 tags: Vec::new(),
@@ -249,7 +275,18 @@ fn is_fence_close(line: &str, kind: char) -> bool {
 }
 
 /// 扫描一个内容根目录下所有 `*.md` / `*.mdx`，返回按路径稳定排序的条目。
+///
+/// 返回条目的 `library` 为空；多库时请使用 [`scan_dir_named`]。
 pub fn scan_dir(root: &Path) -> Result<Vec<Entry>, ScanError> {
+    scan_dir_inner(root, "")
+}
+
+/// 同 [`scan_dir`]，但把每个条目的 `library` 置为给定库名。
+pub fn scan_dir_named(root: &Path, library: &str) -> Result<Vec<Entry>, ScanError> {
+    scan_dir_inner(root, library)
+}
+
+fn scan_dir_inner(root: &Path, library: &str) -> Result<Vec<Entry>, ScanError> {
     let mut files = Vec::new();
     collect_md(root, &mut files).map_err(ScanError::Io)?;
     files.sort();
@@ -259,6 +296,7 @@ pub fn scan_dir(root: &Path) -> Result<Vec<Entry>, ScanError> {
         let rel = file.strip_prefix(root).unwrap_or(&file).to_path_buf();
         for mut e in scan_file(&file)? {
             e.path = rel.clone();
+            e.library = library.to_string();
             entries.push(e);
         }
     }
@@ -341,9 +379,10 @@ tail
         let e = &entries[0];
         assert_eq!(e.directives.len(), 1);
         match &e.directives[0] {
-            Directive::Cmd { lang, body } => {
+            Directive::Cmd { lang, body, lines } => {
                 assert_eq!(lang.as_deref(), Some("bash"));
                 assert_eq!(body, "echo hi\necho bye");
+                assert_eq!(lines, &vec![4, 5]);
             }
             _ => panic!("expected Cmd"),
         }
@@ -356,5 +395,21 @@ tail
         let entries = scan_text(text, Path::new("a.md"));
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw.lines().count(), 3);
+    }
+
+    #[test]
+    fn slice_entry_matches_scanner_boundary() {
+        let text = "\
+## Head
+@index alpha beta
+line one
+@index gamma
+line two
+";
+        // entry start = 2（@index alpha beta 行），到下一个 @index（第 4 行）前结束
+        let sliced = slice_entry(text, 2);
+        assert_eq!(sliced, "@index alpha beta\nline one");
+        // 最后一条到 EOF
+        assert_eq!(slice_entry(text, 4), "@index gamma\nline two");
     }
 }
