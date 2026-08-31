@@ -10,7 +10,8 @@
 - ✅ 已验证：14 单测 + 4 集成全绿；`zoro.toml` 单库 / 多库手动可用
 - ✅ ZORO_ROOT / ZORO_LIBS 已移除，统一 `ZORO_WORKSPACE` → `./zoro.toml`
 - 当前等价阶段：**P0 完成；P1 完成一半（HTML target 已做，ANSI 未做）**
-- ✅ 设计 v8（待提交）：新增 Launcher 桌面前端（P3.5，Tauri 2 + nucleo）与 macOS 分发/签名策略，已写入 agents.md
+- ✅ 设计 v8（已提交 `fd31836`）：新增 Launcher 桌面前端（P3.5，Tauri 2 + nucleo）与 macOS 分发/签名策略；已写入 agents.md
+- ✅ 设计 v9（待提交）：定稿 Action 权限分级 + v1 默认标签集（仅 `@index`/`@cmd`）
 
 ## 任务看板
 
@@ -30,7 +31,7 @@
 |---|------|------|-------------|
 | 6 | `zoro serve` 本地 Web | ext/zoro-server | axum/warp 服务：浏览全量条目、搜索接口、命中渲染；浏览器可用，全程无终端；大众入口 |
 | 7 | CLI + fzf 交互 | zoro | 候选行结构 `title<TAB>index<TAB>library<TAB>path<TAB>start`；`--with-nth` 显示 title，`--nth` 匹配 index；`--preview` 现场截取预览；回车全屏展示 |
-| 8 | `@cmd` 复制/执行 | core+zoro | core 定义 `Action` trait；CLI 落 `ActionRegistry`：复制（默认）、执行（外部来源必须显式确认） |
+| 8 | `@cmd` 行为（按 v9 Action 分级落地） | core+zoro | core 定义 `Action` trait；CLI 落 `ActionRegistry`：`Copy` 默认、`Execute` 确认、`Insert`（回填）平台可选延后；`Open`/`Preview` 由渲染层按内容类型推断 |
 | 9 | 单二进制捆绑 fzf | zoro | release 资产按平台打包 fzf；新机器零安装可用；缺 fzf 时优雅降级非交互输出 |
 
 ### 三、中期：P3.5 Launcher + P4 全文搜索 + P5 静态站点

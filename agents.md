@@ -1,4 +1,4 @@
-# agents.md — zoro 通用知识库框架 · 开发指南（v8 定稿）
+# agents.md — zoro 通用知识库框架 · 开发指南（v9 定稿）
 
 > 本文件是给「后续负责迭代开发的 agent / 人」读的**单一事实源**。
 > 任何 agent 开始本仓库工作前，先读本文件；改动行为前先改本文件。
@@ -11,6 +11,7 @@
 > - v6：单一索引文件 → 版本化元数据（manifest）；单内容根 → 多库工作区。
 > - v7：**统一 Workspace 单一模型**——取消单库/多库两套入口，一律 `zoro.toml` 声明；引入**库级配置扩展**。
 > - v8：新增**桌面前端 Launcher**（全局热键 + 浮窗，Tauri 2 + nucleo 自绘，不用 fzf）与 **macOS 分发/签名策略**。
+> - v9：定稿 **Action 权限分级**（Copy/Open/Preview/Reveal/Execute/Insert）与 **v1 默认标签集**（仅 `@index` + `@cmd`；动作不新增标签）。
 
 ---
 
@@ -94,6 +95,13 @@ git reset --hard <commit>
 ### 4.5 标题（title）规则
 
 - `##` 紧贴 `@index` 上方；索引取"`@index` 向上最近的 `##`"作 `title`；无 `##` 取 `@index` 首词。
+
+### 4.6 v1 默认标签集（最小集）
+
+- 默认**只启用两个**：`@index`（值型，必须）、`@cmd`（结构型，可选）。
+- 其余 `@xxx`（含 `@card`、`@alias` 等占名/未来标签）默认**不启用**：扫描器安全降级，不报错、不编译进 caps。
+- **动作不新增标签**：`Copy`/`Preview`/`Open`/`Reveal` 由正文内容类型在渲染层推断或由运行时决策；`Execute` 由 `@cmd` 声明；`Insert`（回填）只是 `Execute` 的运行时策略。
+- **新增标签的唯一判据**：出现"正文无法自动推断、且会改变消费方式"的语义，才加新标签。
 
 ## 5. 分析（analyze）与库级元数据（manifest）
 
@@ -254,6 +262,21 @@ Markdown 源
 - **能力扩展** = core 定义 trait：`Action` / `SyncProvider` / `Cipher`。
 - **动态加载暂缓**；执行安全：外部来源 `@cmd` 必须显式确认。
 
+### 9.1 Action 权限分级（v9 定稿）
+
+| 动作 | 权限 | 跨平台 | 定位 |
+|------|------|--------|------|
+| `Copy` 复制 | 无 | 一致 | 基础动作 |
+| `Preview` 打开自家渲染视图 | 无 | 一致 | 主力 |
+| `Open` 按内容类型调起系统应用 | 无 | 一致 | 主力 |
+| `Reveal` 在文件管理器显示 | 无 | 一致 | 辅助 |
+| `Execute` 调起终端执行 `@cmd` | 无特殊权限 | 可行 | 可选（需安全确认） |
+| `Insert` 回填到前台应用 | macOS 需 Accessibility；Wayland 基本不可行 | 最差 | 平台可选，最后做 |
+
+- 默认只保证 `Copy` + `Preview`/`Open`（三平台一致可用）。
+- "打开"走系统 IPC（`NSWorkspace` / `ShellExecute` / `xdg-open`），不需要模拟输入权限；只有 `Insert` 涉及模拟输入。
+- Launcher v1 只做 `Copy` + `Preview`/`Open`，不碰 `Insert`。
+
 ## 10. 目录布局（workspace）
 
 ```
@@ -364,3 +387,4 @@ zoro/                        # 本仓库（框架）
 - [ ] 【P2】`zoro serve` 在浏览器完成浏览/搜索/渲染，全程无需终端。
 - [ ] 【P3.5】Launcher 单平台 MVP：常驻进程 + 全局热键唤起 + 无边框浮窗 + nucleo 匹配 + 回车复制/打开渲染；无 fzf 依赖。
 - [ ] 【P3.5 后】回填/执行能力平台可选：缺权限或不支持时降级为复制；"复制 + 打开"三平台一致可用。
+- [ ] 默认标签集：扫描器仅启用 `@index`/`@cmd`；其余 `@xxx` 安全降级、不编译进 caps。
