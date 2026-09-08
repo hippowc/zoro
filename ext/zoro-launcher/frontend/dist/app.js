@@ -118,6 +118,12 @@
     bodyEl.classList.remove("is-hidden", "show-results", "show-preview");
     bodyEl.classList.add("show-detail");
     shellEl.classList.add("show-detail");
+    // Set draggable attribute directly on body element
+    bodyEl.setAttribute("data-wails-draggable", "drag");
+    // Make back button non-draggable
+    if (backBtn) {
+      backBtn.setAttribute("data-wails-draggable", "no-drag");
+    }
   }
 
   function exitDetailMode() {
@@ -125,6 +131,11 @@
     bodyEl.classList.remove("show-detail");
     bodyEl.classList.add("show-results");
     shellEl.classList.remove("show-detail");
+    // Remove draggable attribute
+    bodyEl.removeAttribute("data-wails-draggable");
+    if (backBtn) {
+      backBtn.removeAttribute("data-wails-draggable");
+    }
   }
 
   function renderResults(candidates) {
