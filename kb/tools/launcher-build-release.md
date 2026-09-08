@@ -65,3 +65,40 @@ curl -sL "https://github.com/hippowc/zoro/releases/download/<tag>/zoro-launcher-
 
 - bin/ zoro-launcher 已是 GUI `.app`；ad-hoc 签名用 `codesign --force --deep --sign -`。
 - 改 UI 透明/原生窗口时，三层一起核对：`main.go` 原生窗口配置 → `frontend/dist/index.html` / `styles.css` → `frontend/dist/app.js` 桥接值判空（见 `facts/pitfalls.md` P-1/P-2/P-6）。
+
+## UI 主题配置（v3.2+）
+
+Launcher v3.2 起支持可配置主题系统，通过 `~/.zoro/launcher.toml` 控制：
+
+```toml
+# 可选值: "light-glass" | "dark-glass" | "minimal"
+theme = "dark-glass"
+```
+
+### 可用主题
+
+| 主题名 | 风格 | 适用场景 |
+|--------|------|----------|
+| `light-glass` | 浅色毛玻璃，白色半透明背景 | 明亮环境、传统 macOS 风格 |
+| `dark-glass` | 深色毛玻璃，深灰半透明背景 + 浅色文字 | 暗色环境、更有质感 |
+| `minimal` | 扁平化设计，无模糊效果 | 性能优先、简洁偏好 |
+
+### 键盘快捷键（v3.2+）
+
+| 快捷键 | 动作 |
+|--------|------|
+| **Enter** | 在浏览器中弹出结果窗口 |
+| **⌘+C** | 复制原始 Markdown 到剪贴板 |
+| **⌘+Enter** | 用默认编辑器打开源文件 |
+| **↑ / ↓** | 导航搜索结果 |
+| **Esc** | 隐藏 launcher |
+
+### 搜索结果汇总
+
+搜索框下方会显示命中数量（如 "5 条命中"），无结果时自动隐藏。
+
+### 注意事项
+
+- 主题切换需重启 launcher 生效
+- 配置文件不存在时使用默认主题 `light-glass`
+- Popout 窗口通过系统浏览器实现（Wails v2 不支持多窗口）
