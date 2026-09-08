@@ -172,14 +172,13 @@ html, body {
   pointer-events: auto;
 }
 .body.show-preview { 
-  flex-direction: row;
+  flex-direction: column;
 }
 .body.show-preview .results {
-  flex: 0 0 240px;
-  width: 240px;
-  min-width: 240px;
+  flex: 0 0 auto;
+  max-height: 45%;
 }
-.body.show-preview .preview { display: block; flex: 1; min-width: 0; }
+.body.show-preview .preview { display: block; flex: 1; min-height: 0; }
 .body.show-results .preview { display: none; }
 
 /* Detail mode: full-screen preview */
@@ -296,8 +295,8 @@ html, body {
   display: none;
 }
 .shell.show-detail .body.show-detail .preview {
-  -webkit-app-region: drag;
+  --wails-draggable: drag;
 }
 .shell.show-detail .body.show-detail .back-btn {
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 }
