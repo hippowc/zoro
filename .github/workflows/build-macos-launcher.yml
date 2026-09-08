@@ -1,0 +1,50 @@
+name: build-macos-launcher
+
+on:
+  push:
+    tags:
+      - 'launcher-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: |
+            go.sum
+            ext/zoro-launcher/go.sum
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: Build zoro launcher (darwin/arm64)
+        working-directory: ext/zoro-launcher
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          export GOPROXY="https://proxy.golang.org,direct"
+          wails build -clean -platform darwin/arm64 -o zoro-launcher
+
+      - name: Package .app
+        run: |
+          APP="ext/zoro-launcher/build/bin/zoro-launcher.app"
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" zoro-launcher-macos-arm64.zip
+          shasum -a 256 zoro-launcher-macos-arm64.zip | tee zoro-launcher-macos-arm64.zip.sha256
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "zoro launcher（macOS Apple Silicon）${{ github.ref_name }}"
+          files: |
+            zoro-launcher-macos-arm64.zip
+            zoro-launcher-macos-arm64.zip.sha256
