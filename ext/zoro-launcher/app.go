@@ -20,28 +20,29 @@ type LauncherConfig struct {
 }
 
 // App is the Wails-bound bridge between the launcher UI and zoro core.
-// It exposes the Launcher v1 action surface: Query + Preview/Render + Copy + Open.
 type App struct {
 	ctx    context.Context
 	ws     *core.Workspace
 	wsErr  error
 	wsPath string
-
 	config LauncherConfig
 
 	windowVisible    bool
 	unregisterHotkey func()
+	popoutManager    *PopoutManager
 }
 
 // NewApp creates the bound app.
-func NewApp() *App { return &App{} }
+func NewApp() *App {
+	return &App{
+		popoutManager: NewPopoutManager(),
+	}
+}
 
 // startup loads the zoro workspace (cold-start first, auto rebuild when stale).
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.wsPath = launcherWorkspacePath()
-	// 全局默认工作区（~/.zoro）在首次启动时自动创建：配置目录、默认知识库与
-	// 索引目录都就位，避免用户手动维护 zoro.toml。
 	if p, err := core.DefaultWorkspacePath(); err == nil && a.wsPath == p {
 		if _, err := core.EnsureDefaultWorkspace(); err != nil {
 			a.wsErr = err
@@ -50,14 +51,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 	ws, err := core.LoadWorkspace(a.wsPath)
 	if err != nil {
-		// Workspace errors surface in the UI instead of crashing the launcher.
 		a.ws = nil
 		a.wsErr = err
 		return
 	}
 	a.ws = ws
-
-	// Load launcher UI config
 	a.loadConfig()
 }
 
@@ -65,15 +63,14 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) loadConfig() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return // silently ignore, use defaults
+		return
 	}
 	cfgPath := filepath.Join(home, ".zoro", "launcher.toml")
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return // file doesn't exist yet, use defaults
+		return
 	}
 
-	// Parse manually to avoid adding another dependency
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -91,7 +88,6 @@ func (a *App) loadConfig() {
 		}
 	}
 
-	// Validate theme value
 	switch a.config.Theme {
 	case "light-glass", "dark-glass", "minimal":
 		// valid
@@ -157,9 +153,7 @@ func (a *App) OpenSource(library, path string) (string, error) {
 	return p, nil
 }
 
-// PopoutResult renders a candidate's content to HTML and opens it in a temporary
-// browser window for side-by-side reference. This is a workaround for Wails v2's
-// lack of native multi-window support.
+// PopoutResult creates a floating window with the rendered result using Preview.app.
 func (a *App) PopoutResult(library, path string, start int) error {
 	raw, err := a.LoadRaw(library, path, start)
 	if err != nil {
@@ -171,48 +165,36 @@ func (a *App) PopoutResult(library, path string, start int) error {
 		return err
 	}
 
-	// Write to temp file and open in browser
+	// Write to temp file
 	tmpDir, err := os.MkdirTemp("", "zoro-popout-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 
 	tmpFile := filepath.Join(tmpDir, "result.html")
-	fullHTML := fmt.Sprintf(`<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>zoro - Result</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 20px;
-      font-family: system-ui, -apple-system, sans-serif;
-      line-height: 1.6;
-      color: #1c1e24;
-      background: #fff;
-    }
-    .content { max-width: 800px; margin: 0 auto; }
-    pre { background: #f5f6f8; padding: 12px; border-radius: 6px; overflow: auto; }
-    code { font-family: "SF Mono", Monaco, monospace; }
-    a { color: #3157d1; }
-  </style>
-</head>
-<body>
-  <div class="content">%s</div>
-</body>
-</html>`, html)
-
+	fullHTML := generatePopoutHTML(html)
 	if err := os.WriteFile(tmpFile, []byte(fullHTML), 0644); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 
-	// Open in default browser (stays on screen independently)
-	return launchFile(tmpFile)
+	// Open with Preview.app on macOS (lightweight, stays on screen)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", "-a", "Preview", tmpFile)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", tmpFile)
+	default:
+		cmd = exec.Command("xdg-open", tmpFile)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open %q: %w", tmpFile, err)
+	}
+	return nil
 }
 
-// Copy puts text on the system clipboard (Copy action; no special permission).
+// Copy puts text on the system clipboard.
 func (a *App) Copy(text string) error {
 	if a.ctx == nil {
 		return fmt.Errorf("app not started")
@@ -225,7 +207,7 @@ func (a *App) GetTheme() string {
 	return a.config.Theme
 }
 
-// Hide hides the launcher window while the process keeps running.
+// Hide hides the launcher window.
 func (a *App) Hide() {
 	if a.ctx != nil {
 		wailsruntime.WindowHide(a.ctx)
@@ -244,8 +226,6 @@ func launcherWorkspacePath() string {
 	if p := os.Getenv("ZORO_WORKSPACE"); p != "" {
 		return p
 	}
-	// 保留项目级工作区习惯：cwd 存在 zoro.toml 时使用它；否则落到全局默认
-	// ~/.zoro/zoro.toml（由 startup 自动创建）。
 	if _, err := os.Stat("zoro.toml"); err == nil {
 		return "zoro.toml"
 	}
@@ -269,4 +249,66 @@ func launchFile(path string) error {
 		return fmt.Errorf("open %q: %w", path, err)
 	}
 	return nil
+}
+
+func generatePopoutHTML(content string) string {
+	return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>zoro result</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.6;
+      color: #1c1e24;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .content {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; }
+    p { margin: 0.5em 0; }
+    pre {
+      background: #f5f6f8;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 1em 0;
+    }
+    code {
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 0.9em;
+    }
+    a { color: #3157d1; }
+    blockquote {
+      border-left: 4px solid #ddd;
+      padding-left: 16px;
+      margin: 1em 0;
+      color: #666;
+    }
+    ul, ol { margin: 0.5em 0 0.5em 1.5em; }
+    li { margin: 0.25em 0; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1em 0;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    th { background: #f5f6f8; }
+  </style>
+</head>
+<body>
+  <div class="content">` + content + `</div>
+</body>
+</html>`
 }

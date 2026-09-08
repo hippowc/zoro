@@ -78,7 +78,6 @@
   function setSummary(text) {
     if (!summaryEl) return;
     summaryEl.textContent = text || "";
-    summaryEl.classList.toggle("is-empty", !text);
   }
 
   function updateClear() {
@@ -105,7 +104,6 @@
     previewEl.innerHTML = "";
     current = [];
     active = -1;
-    setSummary("");
   }
 
   function renderResults(candidates) {
@@ -116,7 +114,6 @@
     // 没有匹配时不展示结果区，避免空白面板。
     if (!current.length) {
       hideBody();
-      setSummary("");
       return;
     }
 

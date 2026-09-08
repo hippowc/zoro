@@ -145,35 +145,36 @@ html, body {
   color: var(--fg);
 }
 
-/* Summary info below search box */
+/* Summary inside body - only visible when results exist */
 .summary {
   flex: none;
-  padding: 0 4px;
-  min-height: 18px;
+  padding: 4px 8px;
   color: var(--muted);
   font-size: 12px;
   opacity: 0.85;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-  transition: opacity 0.12s ease;
-}
-.summary.is-empty {
-  opacity: 0;
-  pointer-events: none;
+  border-bottom: 1px solid var(--stroke-soft);
+  margin-bottom: 4px;
 }
 
 /* 结果区只在有内容时展开收拢，不再预留空白 */
 .body {
   display: none;
+  flex-direction: column;
   flex: 0 0 auto;
-  grid-template-columns: 1fr;
   gap: 10px;
   min-height: 0;
+  pointer-events: none;
 }
 .body:not(.is-hidden) {
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
+  pointer-events: auto;
 }
-.body.show-preview { grid-template-columns: 240px 1fr; }
+.body.show-preview { 
+  flex-direction: row;
+  grid-template-columns: 240px 1fr; 
+}
 .body.show-preview .preview { display: block; }
 .body.show-results .preview { display: none; }
 

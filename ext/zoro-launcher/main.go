@@ -80,6 +80,9 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.unregisterHotkey != nil {
 		a.unregisterHotkey()
 	}
+	if a.popoutManager != nil {
+		a.popoutManager.CloseAll()
+	}
 }
 
 // toggle alternates the frameless summon window between visible and hidden.
