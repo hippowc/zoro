@@ -75,8 +75,6 @@ import "C"
 // trigger is fed by exported Go callback `goZoroHotKey` (invoked from C).
 var trigger = make(chan struct{}, 8)
 
-// goZoroHotKey is exported to C. It runs on the main run loop; keep it trivial.
-//
 //export goZoroHotKey
 func goZoroHotKey() {
 	select {
