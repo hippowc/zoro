@@ -92,7 +92,9 @@
     bodyEl.classList.add("show-results");
     bodyEl.classList.remove("show-preview");
     previewEl.innerHTML = "";
-    shellEl.classList.remove("hide-status");
+    if (shellEl) {
+      shellEl.classList.remove("hide-status");
+    }
   }
 
   function showPreview() {
@@ -109,22 +111,28 @@
     current = [];
     active = -1;
     detailMode = false;
-    shellEl.classList.add("hide-status");
-    shellEl.classList.remove("show-detail");
+    if (shellEl) {
+      shellEl.classList.add("hide-status");
+      shellEl.classList.remove("show-detail");
+    }
   }
 
   function showDetailMode() {
     detailMode = true;
     bodyEl.classList.remove("is-hidden", "show-results", "show-preview");
     bodyEl.classList.add("show-detail");
-    shellEl.classList.add("show-detail");
+    if (shellEl) {
+      shellEl.classList.add("show-detail");
+    }
   }
 
   function exitDetailMode() {
     detailMode = false;
     bodyEl.classList.remove("show-detail");
     bodyEl.classList.add("show-results");
-    shellEl.classList.remove("show-detail");
+    if (shellEl) {
+      shellEl.classList.remove("show-detail");
+    }
   }
 
   function renderResults(candidates) {
@@ -354,6 +362,8 @@
     .catch(function (e) { setStatus("读取状态失败：" + e); });
 
   updateClear();
-  shellEl.classList.add("hide-status");
+  if (shellEl) {
+    shellEl.classList.add("hide-status");
+  }
   queryEl.focus();
 })();
