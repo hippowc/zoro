@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zoro launcher</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="top">
+        <input id="query" class="query" type="search" placeholder="搜索 zoro 库（如：git / 定投）…" autocomplete="off" />
+      </header>
+      <section class="body">
+        <ul id="results" class="results"></ul>
+        <article id="preview" class="preview"></article>
+      </section>
+      <footer class="status" id="status">读取工作区…</footer>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

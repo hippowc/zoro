@@ -1,2 +1,14 @@
-/target
+/bin/
 .zoro/
+
+# Go
+*.test
+*.out
+
+# Wails launcher build output
+ext/zoro-launcher/bin/
+ext/zoro-launcher/build/
+ext/zoro-launcher/frontend/node_modules/
+ext/zoro-launcher/node_modules/
+ext/zoro-launcher/zoro-launcher
+ext/zoro-launcher/zoro-launcher.app
