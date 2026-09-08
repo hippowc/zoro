@@ -301,7 +301,13 @@ html, body {
   display: none;
 }
 
-/* Detail mode: hide search box */
+/* Detail mode: hide search box, make body draggable */
 .shell.show-detail .top {
   display: none;
+}
+.shell.show-detail .body.show-detail {
+  --wails-draggable: drag;
+}
+.shell.show-detail .body.show-detail .back-btn {
+  --wails-draggable: no-drag;
 }
