@@ -24,6 +24,7 @@
   var clearBtn = document.getElementById("clear");
   var summaryEl = document.getElementById("summary");
   var backBtn = document.getElementById("backBtn");
+  var shellEl = document.querySelector(".shell");
 
   var current = [];
   var active = -1;
@@ -91,6 +92,7 @@
     bodyEl.classList.add("show-results");
     bodyEl.classList.remove("show-preview");
     previewEl.innerHTML = "";
+    shellEl.classList.remove("hide-status");
   }
 
   function showPreview() {
@@ -107,18 +109,22 @@
     current = [];
     active = -1;
     detailMode = false;
+    shellEl.classList.add("hide-status");
+    shellEl.classList.remove("show-detail");
   }
 
   function showDetailMode() {
     detailMode = true;
     bodyEl.classList.remove("is-hidden", "show-results", "show-preview");
     bodyEl.classList.add("show-detail");
+    shellEl.classList.add("show-detail");
   }
 
   function exitDetailMode() {
     detailMode = false;
     bodyEl.classList.remove("show-detail");
     bodyEl.classList.add("show-results");
+    shellEl.classList.remove("show-detail");
   }
 
   function renderResults(candidates) {
@@ -285,6 +291,11 @@
   document.addEventListener("keydown", function (e) {
     var meta = e.metaKey || e.ctrlKey;
     
+    // Ignore Enter during IME composition (e.g., Chinese input method)
+    if (e.isComposing || e.keyCode === 229) {
+      return;
+    }
+    
     // Esc: exit detail mode or hide launcher
     if (e.key === "Escape") {
       e.preventDefault();
@@ -343,5 +354,6 @@
     .catch(function (e) { setStatus("读取状态失败：" + e); });
 
   updateClear();
+  shellEl.classList.add("hide-status");
   queryEl.focus();
 })();

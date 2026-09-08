@@ -173,9 +173,13 @@ html, body {
 }
 .body.show-preview { 
   flex-direction: row;
-  grid-template-columns: 240px 1fr; 
 }
-.body.show-preview .preview { display: block; }
+.body.show-preview .results {
+  flex: 0 0 240px;
+  width: 240px;
+  min-width: 240px;
+}
+.body.show-preview .preview { display: block; flex: 1; min-width: 0; }
 .body.show-results .preview { display: none; }
 
 /* Detail mode: full-screen preview */
@@ -281,3 +285,19 @@ html, body {
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .status .hint { white-space: nowrap; opacity: 0.8; }
+
+/* Hide status bar when no results are shown */
+.shell.hide-status .status {
+  display: none;
+}
+
+/* Detail mode: hide search box, make preview draggable */
+.shell.show-detail .top {
+  display: none;
+}
+.shell.show-detail .body.show-detail .preview {
+  -webkit-app-region: drag;
+}
+.shell.show-detail .body.show-detail .back-btn {
+  -webkit-app-region: no-drag;
+}
