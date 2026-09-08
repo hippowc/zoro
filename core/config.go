@@ -10,7 +10,11 @@ import (
 // WorkspaceConfig is the parsed `zoro.toml`.
 type WorkspaceConfig struct {
 	// Default is the library opened when no query arg is given (by name).
-	Default   string        `toml:"default"`
+	Default string `toml:"default"`
+	// DataDir is the optional per-workspace directory for derived files
+	// (manifest + readable TSV). When set, each library's derived files live at
+	// DataDir/<library-name>/. When empty, legacy in-place locations are used.
+	DataDir   string        `toml:"data_dir"`
 	Libraries []LibrarySpec `toml:"libraries"`
 }
 
@@ -37,6 +41,7 @@ type LibraryConfig struct {
 // before being split into known fields + Extra.
 type workspaceConfigDTO struct {
 	Default   string           `toml:"default"`
+	DataDir   string           `toml:"data_dir"`
 	Libraries []librarySpecDTO `toml:"libraries"`
 }
 
@@ -52,7 +57,7 @@ func ParseWorkspaceConfig(s string) (WorkspaceConfig, error) {
 	if err := toml.Unmarshal([]byte(s), &dto); err != nil {
 		return WorkspaceConfig{}, err
 	}
-	cfg := WorkspaceConfig{Default: dto.Default, Libraries: make([]LibrarySpec, 0, len(dto.Libraries))}
+	cfg := WorkspaceConfig{Default: dto.Default, DataDir: dto.DataDir, Libraries: make([]LibrarySpec, 0, len(dto.Libraries))}
 	for _, spec := range dto.Libraries {
 		cfg.Libraries = append(cfg.Libraries, LibrarySpec{
 			Name:   spec.Name,
@@ -80,6 +85,9 @@ func WorkspaceConfigFromPath(path string) (WorkspaceConfig, error) {
 
 // ResolvePaths turns relative roots into absolute paths based on `base`.
 func (c *WorkspaceConfig) ResolvePaths(base string) {
+	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) {
+		c.DataDir = filepath.Clean(filepath.Join(base, c.DataDir))
+	}
 	for i := range c.Libraries {
 		root := c.Libraries[i].Root
 		if !filepath.IsAbs(root) {
@@ -124,6 +132,7 @@ type librarySpecOut struct {
 // fields plus a raw config table merged from known keys and Extra.
 type workspaceConfigOut struct {
 	Default   string           `toml:"default,omitempty"`
+	DataDir   string           `toml:"data_dir,omitempty"`
 	Libraries []librarySpecOut `toml:"libraries,omitempty"`
 }
 
@@ -134,6 +143,7 @@ type workspaceConfigOut struct {
 func MarshalWorkspaceConfig(cfg WorkspaceConfig) (string, error) {
 	out := workspaceConfigOut{
 		Default:   cfg.Default,
+		DataDir:   cfg.DataDir,
 		Libraries: make([]librarySpecOut, 0, len(cfg.Libraries)),
 	}
 	for _, spec := range cfg.Libraries {

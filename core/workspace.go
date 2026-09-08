@@ -26,7 +26,7 @@ func BuildWorkspace(cfg *WorkspaceConfig) (*Workspace, error) {
 	}
 	ws := &Workspace{make([]*Library, 0, len(cfg.Libraries))}
 	for _, spec := range cfg.Libraries {
-		lib, err := OpenLibraryCachedWithConfig(spec.Name, spec.Root, spec.Config)
+		lib, err := OpenLibraryCachedWithConfigAndData(spec.Name, spec.Root, spec.Config, cfg.DataDir)
 		if err != nil {
 			return nil, err
 		}

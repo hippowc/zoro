@@ -15,7 +15,10 @@ type Library struct {
 	Name   string
 	Root   string
 	Config LibraryConfig
-	Blocks []Block
+	// DataDir, when non-empty, redirects derived files (manifest + readable
+	// TSV) into DataDir/<Name>/ instead of the content root.
+	DataDir string
+	Blocks  []Block
 }
 
 // OpenLibrary fully scans a content root (online mode; block.Raw is populated).
@@ -40,7 +43,13 @@ func OpenLibraryWithConfig(name, root string, config LibraryConfig) (*Library, e
 
 // OpenLibraryCachedWithConfig is the cold-start-first path with config.
 func OpenLibraryCachedWithConfig(name, root string, config LibraryConfig) (*Library, error) {
-	lib := &Library{Name: name, Root: root, Config: config}
+	return OpenLibraryCachedWithConfigAndData(name, root, config, "")
+}
+
+// OpenLibraryCachedWithConfigAndData is the cached open path for workspaces
+// that redirect derived files into a per-workspace data directory.
+func OpenLibraryCachedWithConfigAndData(name, root string, config LibraryConfig, dataDir string) (*Library, error) {
+	lib := &Library{Name: name, Root: root, Config: config, DataDir: dataDir}
 	if _, err := lib.Analyze(false); err != nil {
 		return nil, err
 	}
@@ -49,11 +58,17 @@ func OpenLibraryCachedWithConfig(name, root string, config LibraryConfig) (*Libr
 
 // MetaPath returns the library manifest path.
 func (l *Library) MetaPath() string {
+	if l.DataDir != "" {
+		return filepath.Join(l.DataDir, l.Name, "meta.json")
+	}
 	return filepath.Join(l.Root, ".zoro", "meta.json")
 }
 
 // IndexViewPath returns the readable TSV view path.
 func (l *Library) IndexViewPath() string {
+	if l.DataDir != "" {
+		return filepath.Join(l.DataDir, l.Name, "zoro-index.tsv")
+	}
 	return filepath.Join(l.Root, "zoro-index.tsv")
 }
 

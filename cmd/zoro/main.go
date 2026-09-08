@@ -25,7 +25,7 @@ commands:
   serve                          启动本地 Web（P2，尚未实现）
 
 无子命令：若 zoro.toml 声明了 default，则浏览该库全部条目。
-workspace: 由 ZORO_WORKSPACE 或 ./zoro.toml 声明
+workspace: ZORO_WORKSPACE -> ./zoro.toml（若存在）-> ~/.zoro/zoro.toml（自动创建）
 `
 
 const addUsage = `usage: zoro add [--default] <name> <root>
@@ -159,8 +159,8 @@ func main() {
 }
 
 // runAdd adds one [[libraries]] entry and rewrites the workspace file.
-// Existing relative roots are preserved: this path parses raw text rather than
-// the resolved WorkspaceConfig used at runtime.
+// The root is resolved to an absolute path before it is stored so the config
+// stays valid no matter where the process is launched from afterwards.
 func runAdd(args []string) {
 	setDefault := false
 	var pos []string
@@ -197,6 +197,12 @@ func runAdd(args []string) {
 	}
 
 	wsPath := workspacePath()
+	if p, err := core.DefaultWorkspacePath(); err == nil && wsPath == p {
+		if _, err := core.EnsureDefaultWorkspace(); err != nil {
+			fatalf("error: 初始化默认工作区失败: %v\n", err)
+		}
+	}
+
 	cfg := core.WorkspaceConfig{}
 	if data, err := os.ReadFile(wsPath); err == nil {
 		cfg, err = core.ParseWorkspaceConfig(string(data))
@@ -213,16 +219,19 @@ func runAdd(args []string) {
 		}
 	}
 
-	cfg.Libraries = append(cfg.Libraries, core.LibrarySpec{Name: name, Root: rootArg})
+	// 相对路径以 zoro.toml 所在目录为基准解析成绝对路径后再写入。
+	rootAbs := rootArg
+	if !filepath.IsAbs(rootAbs) {
+		rootAbs = filepath.Join(filepath.Dir(wsPath), rootAbs)
+	}
+	rootAbs = filepath.Clean(rootAbs)
+
+	cfg.Libraries = append(cfg.Libraries, core.LibrarySpec{Name: name, Root: rootAbs})
 	if setDefault || (len(cfg.Libraries) == 1 && cfg.Default == "") {
 		cfg.Default = name
 	}
 
 	// 新库根目录不存在则创建，保证随后 index / search 立即可用。
-	rootAbs := rootArg
-	if !filepath.IsAbs(rootAbs) {
-		rootAbs = filepath.Join(filepath.Dir(wsPath), rootAbs)
-	}
 	if _, err := os.Stat(rootAbs); os.IsNotExist(err) {
 		if err := os.MkdirAll(rootAbs, 0o755); err != nil {
 			fatalf("error: 创建库目录失败 %s: %v\n", rootAbs, err)
@@ -236,7 +245,7 @@ func runAdd(args []string) {
 		fatalf("error: 写回工作区失败 %s: %v\n", wsPath, err)
 	}
 
-	fmt.Printf("added\t%s\t%s\n", name, rootArg)
+	fmt.Printf("added\t%s\t%s\n", name, rootAbs)
 	if cfg.Default == name {
 		fmt.Printf("default\t%s\n", name)
 	}
@@ -295,6 +304,12 @@ func launchFile(path string) error {
 
 func openCLI() *cli {
 	wsPath := workspacePath()
+	if p, err := core.DefaultWorkspacePath(); err == nil && wsPath == p {
+		if _, err := core.EnsureDefaultWorkspace(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: 初始化默认工作区失败: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	cfg, err := core.WorkspaceConfigFromPath(wsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: 读取工作区声明失败 %s: %v\n", wsPath, err)
@@ -394,9 +409,17 @@ func fatalf(format string, a ...any) {
 	os.Exit(1)
 }
 
-// workspacePath follows: ZORO_WORKSPACE -> ./zoro.toml.
+// workspacePath follows: ZORO_WORKSPACE -> ./zoro.toml（若存在）-> ~/.zoro/zoro.toml.
+// 全局默认工作区由 EnsureDefaultWorkspace 负责创建；本地 zoro.toml 优先保留
+// 项目级工作区习惯。
 func workspacePath() string {
 	if p := os.Getenv("ZORO_WORKSPACE"); p != "" {
+		return p
+	}
+	if _, err := os.Stat("zoro.toml"); err == nil {
+		return "zoro.toml"
+	}
+	if p, err := core.DefaultWorkspacePath(); err == nil {
 		return p
 	}
 	return "zoro.toml"

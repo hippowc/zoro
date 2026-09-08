@@ -1,9 +1,12 @@
 :root {
-  --bg: rgba(27, 38, 54, 0.92);
-  --panel: rgba(34, 48, 71, 0.86);
-  --fg: #e8edf3;
-  --muted: #8fa0b8;
-  --accent: #4c8dff;
+  --fg: #f2f4f8;
+  --muted: rgba(242, 244, 248, 0.62);
+  --glass: rgba(32, 34, 40, 0.44);
+  --glass-strong: rgba(40, 43, 50, 0.55);
+  --stroke: rgba(255, 255, 255, 0.13);
+  --stroke-soft: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.12);
+  --mark: rgba(255, 255, 255, 0.24);
   font-size: 15px;
 }
 * { box-sizing: border-box; }
@@ -20,55 +23,90 @@ html, body {
   height: 100vh;
   padding: 14px;
   gap: 10px;
-  background: var(--bg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  border-radius: 16px;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(26px) saturate(150%);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
 }
 .top {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+.search-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--stroke-soft);
+  border-radius: 11px;
+}
+.search-box:focus-within {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.10);
+}
+.search-icon {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  user-select: none;
+}
 .top .query {
   flex: 1;
-  padding: 11px 14px;
+  min-width: 0;
+  padding: 11px 0;
   font-size: 16px;
   color: var(--fg);
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  outline: none;
-}
-.top .query:focus { border-color: var(--accent); }
-.icon-btn {
-  width: 34px;
-  height: 34px;
+  background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 0;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.top .query::placeholder { color: var(--muted); }
+.top .query::-webkit-search-cancel-button { -webkit-appearance: none; }
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border: 1px solid var(--stroke-soft);
+  border-radius: 11px;
   color: var(--muted);
-  background: var(--panel);
+  background: rgba(255, 255, 255, 0.07);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
-.icon-btn:hover { color: var(--fg); }
+.icon-btn:hover { color: var(--fg); background: rgba(255, 255, 255, 0.12); }
 .body {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   min-height: 0;
 }
+.body.is-hidden { display: none; }
+.body .preview { display: none; }
+.body.show-preview { grid-template-columns: 240px 1fr; }
+.body.show-preview .preview { display: block; }
 .results, .preview {
   margin: 0;
   padding: 8px;
-  background: var(--panel);
-  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stroke-soft);
+  border-radius: 12px;
   overflow: auto;
 }
 .results { list-style: none; }
-.item { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
-.item.active { background: rgba(76, 141, 255, 0.18); }
+.item { padding: 9px 11px; border-radius: 9px; cursor: pointer; }
+.item:hover { background: rgba(255, 255, 255, 0.07); }
+.item.active { background: var(--active); }
 .item-title { font-weight: 600; }
 .item-index {
   color: var(--muted);
@@ -78,22 +116,23 @@ html, body {
 }
 .item-index mark {
   color: var(--fg);
-  background: rgba(76, 141, 255, 0.35);
+  background: var(--mark);
   border-radius: 3px;
   padding: 0 1px;
 }
-.item-sub { color: var(--muted); font-size: 11px; margin-top: 3px; opacity: 0.75; }
+.item-sub { color: var(--muted); font-size: 11px; margin-top: 3px; opacity: 0.8; }
 .empty { color: var(--muted); padding: 10px; }
 .preview {
   font-size: 14px;
   line-height: 1.65;
 }
 .preview pre {
-  background: #101827;
+  background: rgba(0, 0, 0, 0.28);
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 9px;
   overflow: auto;
 }
+.preview a { color: #c7d7fb; }
 .status {
   display: flex;
   justify-content: space-between;

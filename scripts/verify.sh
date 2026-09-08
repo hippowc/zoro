@@ -46,14 +46,14 @@ echo "== zoro open --print 定投（打印源文件路径，不实际打开）==
 ./bin/zoro open --print 定投
 
 echo
-echo "== zoro add 空工作区 MVP 验证（临时目录）=="
+echo "== zoro add 验证（写入绝对路径）=="
 tmpadd="$(mktemp -d)"
 (
-  unset ZORO_WORKSPACE
+  export ZORO_WORKSPACE="$tmpadd/zoro.toml"
   cd "$tmpadd"
   "$ROOT/bin/zoro" add demo ./demo
   grep -q "name = 'demo'" zoro.toml
-  grep -q "root = './demo'" zoro.toml
+  grep -q "root = '$tmpadd/demo'" zoro.toml
   if "$ROOT/bin/zoro" add demo ./demo >/dev/null 2>&1; then
     echo "FAIL: duplicate add succeeded"
     exit 1

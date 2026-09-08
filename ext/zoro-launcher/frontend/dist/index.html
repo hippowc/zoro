@@ -9,12 +9,15 @@
   <body>
     <main class="shell">
       <header class="top" style="--wails-draggable: drag">
-        <input id="query" class="query" type="search" placeholder="搜索 zoro 库（如：git / 定投）…"
-               autocomplete="off" style="--wails-draggable: no-drag" />
+        <div class="search-box">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="query" class="query" type="search" placeholder="输入关键词搜索 zoro…"
+                 autocomplete="off" style="--wails-draggable: no-drag" />
+        </div>
         <button id="hide" class="icon-btn" title="隐藏（Esc）" style="--wails-draggable: no-drag">×</button>
       </header>
 
-      <section class="body">
+      <section id="body" class="body is-hidden">
         <ul id="results" class="results" style="--wails-draggable: no-drag"></ul>
         <article id="preview" class="preview" style="--wails-draggable: no-drag"></article>
       </section>

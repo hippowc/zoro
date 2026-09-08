@@ -32,6 +32,14 @@ func NewApp() *App { return &App{} }
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.wsPath = launcherWorkspacePath()
+	// 全局默认工作区（~/.zoro）在首次启动时自动创建：配置目录、默认知识库与
+	// 索引目录都就位，避免用户手动维护 zoro.toml。
+	if p, err := core.DefaultWorkspacePath(); err == nil && a.wsPath == p {
+		if _, err := core.EnsureDefaultWorkspace(); err != nil {
+			a.wsErr = err
+			return
+		}
+	}
 	ws, err := core.LoadWorkspace(a.wsPath)
 	if err != nil {
 		// Workspace errors surface in the UI instead of crashing the launcher.
@@ -126,15 +134,13 @@ func launcherWorkspacePath() string {
 	if p := os.Getenv("ZORO_WORKSPACE"); p != "" {
 		return p
 	}
-	// 先看当前目录（CLI 习惯），再看用户主目录（双击 .app 启动时 cwd 通常是 /）。
+	// 保留项目级工作区习惯：cwd 存在 zoro.toml 时使用它；否则落到全局默认
+	// ~/.zoro/zoro.toml（由 startup 自动创建）。
 	if _, err := os.Stat("zoro.toml"); err == nil {
 		return "zoro.toml"
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, "zoro.toml")
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
+	if p, err := core.DefaultWorkspacePath(); err == nil {
+		return p
 	}
 	return "zoro.toml"
 }

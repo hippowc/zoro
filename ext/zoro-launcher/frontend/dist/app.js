@@ -2,6 +2,7 @@
   "use strict";
 
   var queryEl = document.getElementById("query");
+  var bodyEl = document.getElementById("body");
   var resultsEl = document.getElementById("results");
   var previewEl = document.getElementById("preview");
   var statusEl = document.getElementById("status");
@@ -14,7 +15,7 @@
   }
 
   var current = [];
-  var active = 0;
+  var active = -1;
 
   function escapeHtml(s) {
     return String(s == null ? "" : s)
@@ -64,17 +65,43 @@
     statusEl.textContent = text || "";
   }
 
+  function showResults() {
+    bodyEl.classList.remove("is-hidden");
+    bodyEl.classList.add("show-results");
+    bodyEl.classList.remove("show-preview");
+    previewEl.innerHTML = "";
+  }
+
+  function showPreview() {
+    bodyEl.classList.remove("is-hidden");
+    bodyEl.classList.remove("show-results");
+    bodyEl.classList.add("show-preview");
+  }
+
+  function hideBody() {
+    bodyEl.classList.add("is-hidden");
+    bodyEl.classList.remove("show-results", "show-preview");
+    resultsEl.innerHTML = "";
+    previewEl.innerHTML = "";
+    current = [];
+    active = -1;
+  }
+
   function renderResults(candidates) {
     current = candidates || [];
-    active = 0;
+    active = -1;
     resultsEl.innerHTML = "";
+
     if (!current.length) {
+      showResults();
       resultsEl.innerHTML = '<li class="empty">没有匹配条目</li>';
       return;
     }
+
+    showResults();
     current.forEach(function (c, i) {
       var li = document.createElement("li");
-      li.className = "item" + (i === 0 ? " active" : "");
+      li.className = "item";
       li.dataset.index = String(i);
 
       var title = document.createElement("div");
@@ -95,7 +122,6 @@
       li.addEventListener("click", function () { select(i); });
       resultsEl.appendChild(li);
     });
-    if (current.length) select(0, true);
   }
 
   function scrollActiveIntoView() {
@@ -104,19 +130,27 @@
     if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
   }
 
-  function select(i, skipScroll) {
+  function select(i) {
+    if (i < 0 || i >= current.length) return;
     active = i;
     var items = resultsEl.querySelectorAll(".item");
     items.forEach(function (el, idx) {
       el.classList.toggle("active", idx === i);
     });
-    if (!skipScroll) scrollActiveIntoView();
+    scrollActiveIntoView();
+
     var c = current[i];
-    if (!c) return;
+    var idx = i;
+    showPreview();
     bridge.LoadRaw(c.library, c.path, c.start)
       .then(function (raw) { return bridge.RenderHTML(raw || ""); })
-      .then(function (html) { previewEl.innerHTML = html; setStatus(""); })
+      .then(function (html) {
+        if (active !== idx) return;
+        previewEl.innerHTML = html;
+        setStatus("");
+      })
       .catch(function (e) {
+        if (active !== idx) return;
         previewEl.textContent = "预览失败：" + e;
         setStatus("预览失败");
       });
@@ -124,11 +158,22 @@
 
   function move(delta) {
     if (!current.length) return;
-    var next = (active + delta + current.length) % current.length;
+    var next;
+    if (active < 0) {
+      next = delta > 0 ? 0 : current.length - 1;
+    } else {
+      next = (active + delta + current.length) % current.length;
+    }
     select(next);
   }
 
+  function ensureActive() {
+    if (active < 0 && current.length) select(0);
+  }
+
   function copyActive() {
+    if (!current.length) return;
+    ensureActive();
     var c = current[active];
     if (!c) return;
     bridge.LoadRaw(c.library, c.path, c.start)
@@ -138,6 +183,8 @@
   }
 
   function openActive() {
+    if (!current.length) return;
+    ensureActive();
     var c = current[active];
     if (!c) return;
     bridge.OpenSource(c.library, c.path)
@@ -151,7 +198,12 @@
   }
 
   function doQuery() {
-    var q = queryEl.value || "";
+    var q = (queryEl.value || "").trim();
+    if (!q) {
+      hideBody();
+      setStatus("");
+      return;
+    }
     bridge.Query(q)
       .then(function (candidates) {
         renderResults(candidates);
@@ -200,5 +252,4 @@
     .catch(function (e) { setStatus("读取状态失败：" + e); });
 
   queryEl.focus();
-  doQuery();
 })();

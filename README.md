@@ -29,13 +29,18 @@ export ZORO_WORKSPACE="$PWD/examples/knowledge-base/zoro.toml"
 ./bin/zoro html 定投         # Markdown → HTML
 ```
 
-新建工作区（不污染示例）：
+新建工作区：
 
 ```bash
+# 指定 ZORO_WORKSPACE 时写入该文件，适合项目级工作区
 mkdir -p /tmp/notes && cd /tmp/notes
-./bin/zoro add 投资笔记 ./kb   # 在空目录创建 zoro.toml 并添加第一个库（自动设为 default）
+export ZORO_WORKSPACE="$PWD/zoro.toml"
+./bin/zoro add 投资笔记 ./kb   # root 会解析成绝对路径写入；第一个库自动设为 default
 ./bin/zoro index
 ./bin/zoro search 定投
+
+# 不指定时，CLI/桌面端使用全局默认工作区 ~/.zoro/zoro.toml（首次自动创建）
+./bin/zoro add 默认库 ~/notes
 ```
 
 ## 命令
@@ -52,7 +57,13 @@ mkdir -p /tmp/notes && cd /tmp/notes
 | `zoro index` | 强制重建所有库的 manifest + `zoro-index.tsv` |
 | `zoro serve` | 本地 Web（P2，尚未实现） |
 
-`zoro.toml` 查找顺序：`ZORO_WORKSPACE` → `./zoro.toml`。
+`zoro.toml` 查找顺序：`ZORO_WORKSPACE` → `./zoro.toml`（若存在）→ `~/.zoro/zoro.toml`（首次自动创建）。
+
+全局默认目录 `~/.zoro`：
+
+- `~/.zoro/zoro.toml`：默认配置（库 root 存绝对路径）
+- `~/.zoro/kb/`：默认知识库（自动生成一个 `默认知识库.md` 用于临时保存/默认搜索）
+- `~/.zoro/index/<库名>/`：manifest 与 `zoro-index.tsv`（索引文件中的 path 为相对知识库目录的路径）
 
 ## 目录结构
 
@@ -73,7 +84,7 @@ Wails 桌面前端位于 `ext/zoro-launcher`（独立 Go module）。当前 MVP 
 - 全局热键 **Cmd+Shift+Z** 唤起/隐藏浮窗（Carbon `RegisterEventHotKey` 实现，无需辅助功能/输入监控权限）
 - 无边框、置顶、半透明浮窗；`Esc` 隐藏，关闭窗口=隐藏到后台
 - 查询 + 选中预览 + `↵` 复制 + `⌘↵` 打开源文件
-- 工作区查找顺序：`ZORO_WORKSPACE` → `./zoro.toml` → `~/zoro.toml`
+- 工作区查找顺序：`ZORO_WORKSPACE` → `./zoro.toml`（若存在）→ `~/.zoro/zoro.toml`（首次自动创建默认工作区与默认知识库）
 
 > 注意：Wails 应用必须使用 macOS 本机 Xcode 工具链构建，无法在 Linux/Windows 上交叉编译 macOS 版。
 
