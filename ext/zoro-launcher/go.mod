@@ -3,7 +3,7 @@ module zoro-launcher
 go 1.27.1
 
 require (
-	github.com/wailsapp/wails/v2 v2.15.0
+	github.com/wailsapp/wails/v3 v3.0.0
 	zoro v0.0.0
 )
 
