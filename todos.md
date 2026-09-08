@@ -40,7 +40,8 @@
 | # | 任务 | 归属 | 说明 / 验收 |
 |---|------|------|-------------|
 | 9.5 | ✅ Launcher 单平台 Spike（代码就绪，待 Mac 实测体验） | ext/zoro-launcher | Wails v2：常驻进程 + Carbon 全局热键（Cmd+Shift+Z）+ 无边框透明浮窗 + 自绘列表；动作「复制 + 打开渲染 + 打开源文件」；不回填；`./build-macos.sh` 在 Mac 上构建 |
-| 9.6 | Launcher 三平台 + 回填（后续，视 Spike 结论） | ext/zoro-launcher | 回填按平台可选：macOS/Windows 可行，X11 凑合、Wayland 降级；GUI 大众分发走 Developer ID + 公证，延后到真正大众化阶段 |
+| 9.6 | 🔄 **Wails v3 多窗口升级**（等待稳定版） | ext/zoro-launcher | **TODO**: 等 Wails v3 稳定版发布后，升级实现真正的原生多窗口 + Always on Top。当前使用 Preview.app 临时方案。参考：`kb/journal/2026-09-08-wails-v3-multiwindow-plan.md` |
+| 9.7 | Launcher 三平台 + 回填（后续，视 Spike 结论） | ext/zoro-launcher | 回填按平台可选：macOS/Windows 可行，X11 凑合、Wayland 降级；GUI 大众分发走 Developer ID + 公证，延后到真正大众化阶段 |
 | 10 | 全文搜索 | core | 三面搜索之正文兜底面（bleve/zinc 再定）：`index`=精确面、`title`=召回面、`raw`=兜底面（见 agents.md §7） |
 | 11 | 静态站点发布 | ext/zoro-publish | 把库导出为静态 HTML + 站点搜索（pagefind）；个人站点/分享场景 |
 
