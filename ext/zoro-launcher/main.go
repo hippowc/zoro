@@ -33,9 +33,12 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
-			Appearance:           mac.NSAppearanceNameDarkAqua,
+			Appearance:           mac.NSAppearanceNameAqua,
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
+			// WindowIsTranslucent 会让 macOS 在 WebView 后插入 NSVisualEffectView，
+			// 在某些版本上渲染成一块不透明的深色背景；关闭后配合透明 BackgroundColour
+			// 才能得到真正透明的窗口，玻璃质感由前端 CSS 控制。
+			WindowIsTranslucent: false,
 		},
 		OnStartup:  app.startup,
 		OnDomReady: app.domReady,

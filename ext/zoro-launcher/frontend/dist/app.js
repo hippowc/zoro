@@ -210,6 +210,7 @@
     }
     bridge.Query(q)
       .then(function (candidates) {
+        candidates = candidates || [];
         renderResults(candidates);
         setStatus(candidates.length ? candidates.length + " 条命中" : "没有匹配");
       })
