@@ -58,8 +58,8 @@ func TestQueryCandidateCarriesLibraryAndTitle(t *testing.T) {
 
 func TestQueryEmptyBrowsesAll(t *testing.T) {
 	bs := []Block{
-		{Title: "a", Terms: []string{"x"}},
-		{Title: "b", Terms: []string{"y"}},
+		{Title: "a", Terms: []string{"x"}, Path: "a.md", Start: 1},
+		{Title: "b", Terms: []string{"y"}, Path: "b.md", Start: 1},
 	}
 	found := Search(bs, "lib", "")
 	if len(found) != 2 {

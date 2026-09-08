@@ -33,6 +33,10 @@ type LibraryConfig struct {
 	Preview string
 	// AllowExec is a candidate preference: whether `@shell` execution is allowed.
 	AllowExec *bool
+	// Faces lists the face names to enable. Empty means use default set.
+	Faces []string
+	// FaceWeights maps face name to weight multiplier. Empty means use defaults.
+	FaceWeights map[string]float64
 	// Extra preserves any unknown config key.
 	Extra map[string]any
 }
@@ -115,6 +119,28 @@ func finalizeLibraryConfig(raw map[string]any) LibraryConfig {
 				cfg.AllowExec = &v
 				continue
 			}
+		case "faces":
+			if arr, ok := val.([]any); ok {
+				for _, v := range arr {
+					if s, ok := v.(string); ok {
+						cfg.Faces = append(cfg.Faces, s)
+					}
+				}
+				continue
+			}
+		case "face_weights":
+			if m, ok := val.(map[string]any); ok {
+				cfg.FaceWeights = map[string]float64{}
+				for k, v := range m {
+					switch n := v.(type) {
+					case float64:
+						cfg.FaceWeights[k] = n
+					case int:
+						cfg.FaceWeights[k] = float64(n)
+					}
+				}
+				continue
+			}
 		}
 		cfg.Extra[key] = val
 	}
@@ -182,6 +208,20 @@ func libraryConfigToMap(c LibraryConfig) map[string]any {
 	}
 	if c.AllowExec != nil {
 		m["allow_exec"] = *c.AllowExec
+	}
+	if len(c.Faces) > 0 {
+		faces := make([]any, len(c.Faces))
+		for i, f := range c.Faces {
+			faces[i] = f
+		}
+		m["faces"] = faces
+	}
+	if len(c.FaceWeights) > 0 {
+		w := map[string]any{}
+		for k, v := range c.FaceWeights {
+			w[k] = v
+		}
+		m["face_weights"] = w
 	}
 	for k, v := range c.Extra {
 		if _, exists := m[k]; !exists {

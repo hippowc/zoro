@@ -1,18 +1,28 @@
 (function () {
   "use strict";
 
+  // Load theme from bridge config (falls back to default light-glass)
+  var bridge = window.go && window.go.main && window.go.main.App;
+  if (!bridge) {
+    var statusFallback = document.getElementById("status");
+    if (statusFallback) statusFallback.textContent = "未检测到 Wails bridge（请在 zoro-launcher 中运行）";
+    return;
+  }
+
+  // Apply theme early to avoid FOUC
+  if (bridge.GetTheme) {
+    bridge.GetTheme().then(function (theme) {
+      if (theme) document.documentElement.setAttribute("data-theme", theme);
+    }).catch(function () { /* ignore, use default */ });
+  }
+
   var queryEl = document.getElementById("query");
   var bodyEl = document.getElementById("body");
   var resultsEl = document.getElementById("results");
   var previewEl = document.getElementById("preview");
   var statusEl = document.getElementById("status");
   var clearBtn = document.getElementById("clear");
-
-  var bridge = window.go && window.go.main && window.go.main.App;
-  if (!bridge) {
-    statusEl.textContent = "未检测到 Wails bridge（请在 zoro-launcher 中运行）";
-    return;
-  }
+  var summaryEl = document.getElementById("summary");
 
   var current = [];
   var active = -1;
@@ -65,6 +75,12 @@
     statusEl.textContent = text || "";
   }
 
+  function setSummary(text) {
+    if (!summaryEl) return;
+    summaryEl.textContent = text || "";
+    summaryEl.classList.toggle("is-empty", !text);
+  }
+
   function updateClear() {
     clearBtn.classList.toggle("is-visible", queryEl.value.length > 0);
   }
@@ -89,6 +105,7 @@
     previewEl.innerHTML = "";
     current = [];
     active = -1;
+    setSummary("");
   }
 
   function renderResults(candidates) {
@@ -99,10 +116,12 @@
     // 没有匹配时不展示结果区，避免空白面板。
     if (!current.length) {
       hideBody();
+      setSummary("");
       return;
     }
 
     showResults();
+    setSummary(current.length + " 条命中");
     current.forEach(function (c, i) {
       var li = document.createElement("li");
       li.className = "item";
@@ -186,6 +205,16 @@
       .catch(function (e) { setStatus("复制失败：" + e); });
   }
 
+  function popoutActive() {
+    if (!current.length) return;
+    ensureActive();
+    var c = current[active];
+    if (!c) return;
+    bridge.PopoutResult(c.library, c.path, c.start)
+      .then(function () { setStatus("已在浏览器中打开"); })
+      .catch(function (e) { setStatus("打开失败：" + e); });
+  }
+
   function openActive() {
     if (!current.length) return;
     ensureActive();
@@ -212,7 +241,9 @@
       .then(function (candidates) {
         candidates = candidates || [];
         renderResults(candidates);
-        setStatus(candidates.length ? candidates.length + " 条命中" : "没有匹配");
+        if (!candidates.length) {
+          setStatus("没有匹配");
+        }
       })
       .catch(function (e) { setStatus("查询失败：" + e); });
   }
@@ -254,8 +285,15 @@
       if (meta) {
         openActive();
       } else {
-        copyActive();
+        popoutActive();
       }
+      return;
+    }
+    // Cmd+C / Ctrl+C for copy
+    if ((e.key === "c" || e.key === "C") && meta) {
+      e.preventDefault();
+      copyActive();
+      return;
     }
   });
 

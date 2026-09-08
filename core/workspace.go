@@ -68,6 +68,14 @@ func (w *Workspace) AnalyzeAll(force bool) error {
 	return nil
 }
 
+// Close releases all library store resources.
+func (w *Workspace) Close() error {
+	for _, lib := range w.Libraries {
+		lib.Close()
+	}
+	return nil
+}
+
 // Query aggregates cross-library candidates ranked by score desc.
 func (w *Workspace) Query(q string) []Candidate {
 	var out []Candidate

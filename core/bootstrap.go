@@ -97,11 +97,30 @@ func EnsureDefaultWorkspace() (string, error) {
 		Libraries: []LibrarySpec{{
 			Name: defaultLibraryName,
 			Root: kbRoot,
+			Config: LibraryConfig{
+				Faces: DefaultFaces(),
+				FaceWeights: map[string]float64{
+					"index": DefaultWeightIndex,
+					"title": DefaultWeightTitle,
+					"path":  DefaultWeightPath,
+				},
+			},
 		}},
 	}
 	if err := WriteWorkspaceConfig(wsPath, cfg); err != nil {
 		return "", fmt.Errorf("写入默认工作区 %s: %w", wsPath, err)
 	}
+
+	// Auto-initialize the library's bbolt store on first creation.
+	ws, err := LoadWorkspace(wsPath)
+	if err == nil && len(ws.Libraries) > 0 {
+		lib := ws.Libraries[0]
+		if _, err := lib.Analyze(true); err != nil {
+			// Non-fatal: store will be built on first query/index command.
+		}
+		ws.Close() // Release all store file locks.
+	}
+
 	return wsPath, nil
 }
 

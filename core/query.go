@@ -12,15 +12,14 @@ import (
 // Three-way separation (aligned with fzf):
 // match field (Index) != display field (Title) != payload ((Library, Path)+Start).
 type Candidate struct {
-	Library string  `json:"library"`
-	Title   string  `json:"title"`
-	Index   string  `json:"index"`
-	Path    string  `json:"path"`
-	Start   int     `json:"start"`
-	Score   float64 `json:"score"`
-	// Matches holds highlight ranges into Index (byte offsets, half-open).
-	// Frontends may highlight themselves; this is the core-computed default.
-	Matches []MatchRange `json:"matches,omitempty"`
+	Library      string       `json:"library"`
+	Title        string       `json:"title"`
+	Index        string       `json:"index"`
+	Path         string       `json:"path"`
+	Start        int          `json:"start"`
+	Score        float64      `json:"score"`
+	Matches      []MatchRange `json:"matches,omitempty"`
+	MatchedFaces []string     `json:"matched_faces,omitempty"`
 }
 
 // MatchRange is a highlighted span into the target text.
@@ -169,25 +168,54 @@ func SearchWith(matcher Matcher, blocks []Block, library, query string) []Candid
 	if matcher == nil {
 		matcher = DefaultMatcher
 	}
-	out := make([]Candidate, 0, len(blocks))
+	// Use a single face with the given matcher, weight 1 (no scaling for old API).
+	faces := []Face{&singleMatcherFace{m: matcher}}
+	return SearchMultiFace(faces, blocks, library, query)
+}
+
+// singleMatcherFace wraps a Matcher for SearchWith backward compat.
+type singleMatcherFace struct{ m Matcher }
+
+func (f *singleMatcherFace) Name() string          { return "index" }
+func (f *singleMatcherFace) Weight() float64       { return 1.0 }
+func (f *singleMatcherFace) Text(b *Block) string  { return b.IndexText() }
+func (f *singleMatcherFace) Matcher() Matcher      { return f.m }
+
+// SearchMultiFace runs all faces and merges results.
+// Same block hit by multiple faces → one candidate with accumulated scores.
+func SearchMultiFace(faces []Face, blocks []Block, library, query string) []Candidate {
+	type blockKey struct {
+		path  string
+		start int
+	}
+
+	// Accumulate hits per block.
+	acc := map[blockKey]*candidateAcc{}
+
 	for i := range blocks {
 		b := &blocks[i]
-		text := b.IndexText()
-		match, ok := matcher.Match(query, text)
-		if !ok {
-			continue
+		for _, face := range faces {
+			text := face.Text(b)
+			m, ok := face.Matcher().Match(query, text)
+			if !ok {
+				continue
+			}
+			key := blockKey{b.Path, b.Start}
+			a, exists := acc[key]
+			if !exists {
+				a = &candidateAcc{block: b}
+				acc[key] = a
+			}
+			a.addHit(face.Name(), m.Score*face.Weight(), m.Ranges)
 		}
-		out = append(out, Candidate{
-			Library: library,
-			Title:   b.Title,
-			Index:   text,
-			Path:    b.Path,
-			Start:   b.Start,
-			Score:   match.Score,
-			Matches: match.Ranges,
-		})
 	}
-	// Deterministic: higher score first, then earlier block start.
+
+	out := make([]Candidate, 0, len(acc))
+	for _, a := range acc {
+		c := a.toCandidate(library)
+		out = append(out, c)
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
@@ -195,4 +223,34 @@ func SearchWith(matcher Matcher, blocks []Block, library, query string) []Candid
 		return out[i].Start < out[j].Start
 	})
 	return out
+}
+
+type candidateAcc struct {
+	block     *Block
+	score     float64
+	faces     []string
+	ranges    []MatchRange // from highest-scoring face
+	bestScore float64
+}
+
+func (a *candidateAcc) addHit(face string, score float64, ranges []MatchRange) {
+	a.score += score
+	a.faces = append(a.faces, face)
+	if score > a.bestScore {
+		a.bestScore = score
+		a.ranges = ranges
+	}
+}
+
+func (a *candidateAcc) toCandidate(library string) Candidate {
+	return Candidate{
+		Library:      library,
+		Title:        a.block.Title,
+		Index:        a.block.IndexText(),
+		Path:         a.block.Path,
+		Start:        a.block.Start,
+		Score:        a.score,
+		Matches:      a.ranges,
+		MatchedFaces: a.faces,
+	}
 }

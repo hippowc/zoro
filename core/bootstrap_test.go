@@ -86,23 +86,16 @@ func TestDefaultWorkspaceDerivedFilesRedirectToDataDir(t *testing.T) {
 	}
 	lib := ws.Libraries[0]
 
-	wantMeta := filepath.Join(home, ".zoro", "index", "default", "meta.json")
-	if lib.MetaPath() != wantMeta {
-		t.Fatalf("MetaPath = %q, want %q", lib.MetaPath(), wantMeta)
-	}
-	wantTSV := filepath.Join(home, ".zoro", "index", "default", "zoro-index.tsv")
-	if lib.IndexViewPath() != wantTSV {
-		t.Fatalf("IndexViewPath = %q, want %q", lib.IndexViewPath(), wantTSV)
+	wantDB := filepath.Join(home, ".zoro", "index", "default", "zoro.db")
+	if lib.MetaPath() != wantDB {
+		t.Fatalf("MetaPath = %q, want %q", lib.MetaPath(), wantDB)
 	}
 
 	if _, err := lib.Analyze(true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(wantMeta); err != nil {
-		t.Fatalf("meta not written to data dir: %v", err)
-	}
-	if _, err := os.Stat(wantTSV); err != nil {
-		t.Fatalf("tsv not written to data dir: %v", err)
+	if _, err := os.Stat(wantDB); err != nil {
+		t.Fatalf("store not written to data dir: %v", err)
 	}
 	for _, b := range lib.Blocks {
 		if filepath.IsAbs(b.Path) {

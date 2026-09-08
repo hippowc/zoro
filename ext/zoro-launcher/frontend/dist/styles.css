@@ -1,4 +1,11 @@
+/* ============================================================
+   Theme System — CSS variable presets
+   Switch themes by setting data-theme on <html>:
+     light-glass (default) | dark-glass | minimal
+   ============================================================ */
+
 :root {
+  /* Light Glass (default) */
   --fg: #1c1e24;
   --muted: rgba(28, 30, 36, 0.58);
   --glass: rgba(255, 255, 255, 0.55);
@@ -7,8 +14,36 @@
   --stroke-soft: rgba(255, 255, 255, 0.35);
   --active: rgba(17, 19, 25, 0.07);
   --mark: rgba(255, 197, 65, 0.55);
+  --bg-blur: blur(22px) saturate(160%);
   font-size: 15px;
 }
+
+/* Dark Glass */
+[data-theme="dark-glass"] {
+  --fg: #e8eaed;
+  --muted: rgba(232, 234, 237, 0.55);
+  --glass: rgba(30, 32, 40, 0.60);
+  --glass-strong: rgba(40, 42, 52, 0.75);
+  --stroke: rgba(255, 255, 255, 0.12);
+  --stroke-soft: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.08);
+  --mark: rgba(99, 141, 255, 0.35);
+  --bg-blur: blur(22px) saturate(140%);
+}
+
+/* Minimal (flat, no glass effect) */
+[data-theme="minimal"] {
+  --fg: #1c1e24;
+  --muted: rgba(28, 30, 36, 0.50);
+  --glass: rgba(245, 246, 248, 0.95);
+  --glass-strong: rgba(255, 255, 255, 1);
+  --stroke: rgba(0, 0, 0, 0.08);
+  --stroke-soft: rgba(0, 0, 0, 0.04);
+  --active: rgba(17, 19, 25, 0.05);
+  --mark: rgba(255, 197, 65, 0.45);
+  --bg-blur: none;
+}
+
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
@@ -47,8 +82,8 @@ html, body {
   box-shadow:
     0 8px 28px rgba(31, 35, 46, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
 }
 .search-box:focus-within {
   background: var(--glass-strong);
@@ -110,6 +145,22 @@ html, body {
   color: var(--fg);
 }
 
+/* Summary info below search box */
+.summary {
+  flex: none;
+  padding: 0 4px;
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0.85;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: opacity 0.12s ease;
+}
+.summary.is-empty {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 结果区只在有内容时展开收拢，不再预留空白 */
 .body {
   display: none;
@@ -136,8 +187,8 @@ html, body {
   box-shadow:
     0 8px 28px rgba(31, 35, 46, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
 }
 .results { list-style: none; }
 .preview { display: none; }

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test ./... -v 2>&1 | head -100)",
+      "Bash(which go || ls /usr/local/go/bin/ || ls /usr/lib/go*/bin/ 2>/dev/null || echo \"Go not found in standard locations\")",
+      "Bash(export PATH=$PATH:/usr/local/go/bin && go version && go test ./... 2>&1 | head -150)",
+      "Bash(export PATH=$PATH:/usr/local/go/bin && go test ./... 2>&1)",
+      "Bash(export PATH=$PATH:/usr/local/go/bin && go get go.etcd.io/bbolt@v1.4.0 2>&1)",
+      "Bash(export PATH=$PATH:/usr/local/go/bin && cat /tmp/qoder-cli-cn-0/-root-zoro/816b9390-595c-4f21-b8a2-0d5a7d3f7351/tasks/b27166pb5.output 2>/dev/null || echo \"Output file not found\")"
+    ]
+  }
+}

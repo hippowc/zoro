@@ -120,50 +120,22 @@ root = "lib-b"
 	}
 }
 
-func TestAnalyzeWritesManifestAndTSVView(t *testing.T) {
+func TestAnalyzeWritesStore(t *testing.T) {
 	root := repoTestDir(t, "fixtures")
 	lib, err := core.OpenLibrary("fixtures", root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	metaPath, err := lib.Analyze(true)
+	dbPath, err := lib.Analyze(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(metaPath); err != nil {
+	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := core.ManifestFromJSON(string(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Schema != core.Schema {
-		t.Errorf("schema = %d, want %d", m.Schema, core.Schema)
-	}
-	if m.Library.Name != "fixtures" {
-		t.Errorf("library = %q", m.Library.Name)
-	}
-	if len(m.Blocks) != 4 {
-		t.Errorf("blocks = %d, want 4", len(m.Blocks))
-	}
-
-	tsv, err := os.ReadFile(lib.IndexViewPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tsv) == 0 {
-		t.Fatal("tsv is empty")
-	}
-	firstLine := string(tsv)
-	if idx := findByte(firstLine, '\n'); idx >= 0 {
-		firstLine = firstLine[:idx]
-	}
-	if firstLine != "title\tindex\tstart\tpath" {
-		t.Errorf("tsv header = %q", firstLine)
+	// Verify block count.
+	if len(lib.Blocks) != 4 {
+		t.Errorf("blocks = %d, want 4", len(lib.Blocks))
 	}
 }
 

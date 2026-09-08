@@ -19,6 +19,7 @@ type Library struct {
 	// TSV) into DataDir/<Name>/ instead of the content root.
 	DataDir string
 	Blocks  []Block
+	store   *Store
 }
 
 // OpenLibrary fully scans a content root (online mode; block.Raw is populated).
@@ -50,14 +51,55 @@ func OpenLibraryCachedWithConfig(name, root string, config LibraryConfig) (*Libr
 // that redirect derived files into a per-workspace data directory.
 func OpenLibraryCachedWithConfigAndData(name, root string, config LibraryConfig, dataDir string) (*Library, error) {
 	lib := &Library{Name: name, Root: root, Config: config, DataDir: dataDir}
-	if _, err := lib.Analyze(false); err != nil {
+
+	// Open store and try migration from meta.json.
+	store, err := OpenStore(lib.DBPath())
+	if err != nil {
+		return nil, err
+	}
+	lib.store = store
+
+	// Check if store has data.
+	blocks, _ := store.ReadBlocks(lib.Name)
+	if len(blocks) > 0 {
+		lib.Blocks = blocks
+		return lib, nil
+	}
+
+	// Try migrating from meta.json.
+	oldMetaPath := lib.legacyMetaPath()
+	migrated, err := store.MigrateFromMetaJSON(oldMetaPath, lib.Name)
+	if err != nil {
+		return nil, err
+	}
+	if migrated {
+		blocks, _ = store.ReadBlocks(lib.Name)
+		lib.Blocks = blocks
+		return lib, nil
+	}
+
+	// No store data, no migration possible: full rebuild.
+	if _, err := lib.Analyze(true); err != nil {
 		return nil, err
 	}
 	return lib, nil
 }
 
-// MetaPath returns the library manifest path.
+// MetaPath returns the library manifest path (now the bbolt store).
 func (l *Library) MetaPath() string {
+	return l.DBPath()
+}
+
+// DBPath returns the bbolt store path for this library.
+func (l *Library) DBPath() string {
+	if l.DataDir != "" {
+		return filepath.Join(l.DataDir, l.Name, "zoro.db")
+	}
+	return filepath.Join(l.Root, ".zoro", "zoro.db")
+}
+
+// legacyMetaPath returns the old meta.json path (before DBPath rename).
+func (l *Library) legacyMetaPath() string {
 	if l.DataDir != "" {
 		return filepath.Join(l.DataDir, l.Name, "meta.json")
 	}
@@ -86,12 +128,20 @@ func (l *Library) IsStale() (bool, error) {
 	return hasNewerMD(l.Root, info.ModTime())
 }
 
-// Analyze ensures the manifest is fresh, then returns its path.
+// Analyze ensures the store is fresh, then returns its path.
 //
 // Freshness is file-level: `(path, mtime, size)` fingerprints are compared so
-// only added / changed / removed markdown files trigger rescans. Older
-// manifests without fingerprints are rebuilt once.
+// only added / changed / removed markdown files trigger rescans.
 func (l *Library) Analyze(force bool) (string, error) {
+	// Ensure store is open.
+	if l.store == nil {
+		s, err := OpenStore(l.DBPath())
+		if err != nil {
+			return "", err
+		}
+		l.store = s
+	}
+
 	files, err := listMDFiles(l.Root)
 	if err != nil {
 		return "", err
@@ -99,29 +149,32 @@ func (l *Library) Analyze(force bool) (string, error) {
 	now := fingerprintFiles(files)
 
 	if force {
-		return l.MetaPath(), l.rebuildFull(now)
+		return l.DBPath(), l.rebuildFull(now)
 	}
 
-	m, err := l.readManifest()
-	if err != nil {
-		// Missing / corrupt / schema-mismatch / wrong library: derived data may
-		// be discarded and rebuilt from source.
-		return l.MetaPath(), l.rebuildFull(now)
-	}
-	if len(m.Files) == 0 {
-		// Pre-fingerprint manifest: one full rebuild to write fingerprints.
-		return l.MetaPath(), l.rebuildFull(now)
+	// Try loading fingerprints from store.
+	prevFPs, err := l.store.ReadFingerprints()
+	if err != nil || len(prevFPs) == 0 {
+		return l.DBPath(), l.rebuildFull(now)
 	}
 
-	dirty, removed := diffFingerprints(m.Files, now)
+	dirty, removed := diffFingerprints(prevFPs, now)
 	if len(dirty) == 0 && len(removed) == 0 {
-		l.Blocks = m.IntoBlocks(l.Name)
-		return l.MetaPath(), nil
+		// Load blocks from store.
+		blocks, err := l.store.ReadBlocks(l.Name)
+		if err != nil {
+			return "", err
+		}
+		l.Blocks = blocks
+		return l.DBPath(), nil
 	}
-	return l.MetaPath(), l.rebuildIncremental(m, files, now, dirty, removed)
+
+	// Load existing blocks for incremental rebuild.
+	prevBlocks, _ := l.store.ReadBlocks(l.Name)
+	return l.DBPath(), l.rebuildIncrementalStore(prevBlocks, files, now, dirty, removed)
 }
 
-// rebuildFull rescans every file and rewrites manifest + TSV.
+// rebuildFull rescans every file and rewrites store.
 func (l *Library) rebuildFull(files map[string]FileFingerprint) error {
 	if err := l.Rescan(); err != nil {
 		return err
@@ -129,15 +182,14 @@ func (l *Library) rebuildFull(files map[string]FileFingerprint) error {
 	return l.writeAll(files)
 }
 
-// rebuildIncremental keeps unchanged blocks from the previous manifest and
+// rebuildIncrementalStore keeps unchanged blocks from the previous store and
 // rescans only dirty files; removed files drop their blocks.
-func (l *Library) rebuildIncremental(prev Manifest, files []mdFile, now map[string]FileFingerprint, dirty, removed map[string]bool) error {
+func (l *Library) rebuildIncrementalStore(prevBlocks []Block, files []mdFile, now map[string]FileFingerprint, dirty, removed map[string]bool) error {
 	byRel := make(map[string]mdFile, len(files))
 	for _, f := range files {
 		byRel[f.Rel] = f
 	}
 
-	prevBlocks := prev.IntoBlocks(l.Name)
 	out := make([]Block, 0, len(prevBlocks))
 	for _, b := range prevBlocks {
 		if dirty[b.Path] || removed[b.Path] {
@@ -178,21 +230,15 @@ func (l *Library) rebuildIncremental(prev Manifest, files []mdFile, now map[stri
 	return l.writeAll(now)
 }
 
-// writeAll writes the manifest (with fingerprints) and the readable view.
+// writeAll writes the store (blocks + fingerprints + meta).
 func (l *Library) writeAll(files map[string]FileFingerprint) error {
-	m := NewManifest(l.Name, l.Root, l.Blocks)
-	m.Files = files
-	jsonText, err := m.ToJSON()
-	if err != nil {
+	if err := l.store.WriteBlocks(l.Blocks); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(l.MetaPath()), 0o755); err != nil {
+	if err := l.store.WriteFingerprints(files); err != nil {
 		return err
 	}
-	if err := atomicWrite(l.MetaPath(), []byte(jsonText)); err != nil {
-		return err
-	}
-	return l.writeIndexView()
+	return l.store.WriteLibraryMeta(l.Name, l.Root)
 }
 
 // Rescan reloads all blocks from the content root.
@@ -266,9 +312,72 @@ func (l *Library) LoadRaw(block *Block) (string, error) {
 	return SliceBlock(string(data), block.Start), nil
 }
 
-// Query searches this library's blocks.
+// Query searches this library's blocks, auto-refreshing if files changed.
 func (l *Library) Query(q string) []Candidate {
-	return Search(l.Blocks, l.Name, q)
+	// Auto-refresh: check fingerprints and rebuild incrementally if needed.
+	if err := l.ensureFresh(); err != nil {
+		// Non-fatal: continue with stale blocks rather than failing the query.
+	}
+
+	faces := l.ActiveFaces()
+	if len(faces) == 0 {
+		faces = []Face{IndexFace{W: DefaultWeightIndex}}
+	}
+	return SearchMultiFace(faces, l.Blocks, l.Name, q)
+}
+
+// ensureFresh checks file fingerprints and triggers incremental rebuild if needed.
+func (l *Library) ensureFresh() error {
+	// Ensure store is open.
+	if l.store == nil {
+		s, err := OpenStore(l.DBPath())
+		if err != nil {
+			return err
+		}
+		l.store = s
+	}
+
+	files, err := listMDFiles(l.Root)
+	if err != nil {
+		return err
+	}
+	now := fingerprintFiles(files)
+
+	prevFPs, err := l.store.ReadFingerprints()
+	if err != nil || len(prevFPs) == 0 {
+		// No fingerprints yet: if we already have blocks in memory (from Rescan),
+		// just write them to the store. Otherwise do a full rebuild.
+		if len(l.Blocks) > 0 {
+			return l.writeAll(now)
+		}
+		return l.rebuildFull(now)
+	}
+
+	dirty, removed := diffFingerprints(prevFPs, now)
+	if len(dirty) == 0 && len(removed) == 0 {
+		return nil // Fresh, no changes.
+	}
+
+	// Incremental rebuild.
+	prevBlocks, _ := l.store.ReadBlocks(l.Name)
+	return l.rebuildIncrementalStore(prevBlocks, files, now, dirty, removed)
+}
+
+// ActiveFaces resolves the configured face instances.
+func (l *Library) ActiveFaces() []Face {
+	names := l.Config.Faces
+	if len(names) == 0 {
+		names = DefaultFaces()
+	}
+	return BuildFaces(names, l.Config.FaceWeights)
+}
+
+// Close releases the underlying store resources.
+func (l *Library) Close() error {
+	if l.store != nil {
+		return l.store.Close()
+	}
+	return nil
 }
 
 // fingerprintFiles builds the `(path, mtime, size)` fingerprints for a file list.
