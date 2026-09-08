@@ -145,34 +145,32 @@ html, body {
   color: var(--fg);
 }
 
-/* Summary inside body - only visible when results exist */
+/* Summary inside body - positioned at bottom-left of results */
 .summary {
-  flex: none;
-  padding: 6px 12px;
+  position: absolute;
+  bottom: 4px;
+  left: 8px;
+  padding: 2px 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--glass);
-  border: 1px solid var(--stroke);
-  border-radius: 10px;
-  box-shadow:
-    0 4px 16px rgba(31, 35, 46, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  backdrop-filter: var(--bg-blur);
-  -webkit-backdrop-filter: var(--bg-blur);
+  border-radius: 6px;
+  z-index: 5;
+  pointer-events: none;
 }
 
 /* 结果区只在有内容时展开收拢，不再预留空白 */
 .body {
   display: none;
   flex-direction: column;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   gap: 10px;
   min-height: 0;
   pointer-events: none;
+  position: relative;
 }
 .body:not(.is-hidden) {
   display: flex;
-  flex: 1 1 auto;
   pointer-events: auto;
 }
 .body.show-preview { 
@@ -182,19 +180,22 @@ html, body {
   flex: 0 0 240px;
   width: 240px;
   min-width: 240px;
+  position: relative;
 }
-.body.show-preview .preview { display: block; flex: 1; min-width: 0; }
+.body.show-preview .preview { 
+  display: block; 
+  flex: 1; 
+  min-width: 0; 
+}
 .body.show-results .preview { display: none; }
-/* Results-only mode: constrain width to match preview mode total */
 .body.show-results .results {
-  flex: 0 0 240px;
-  width: 240px;
-  min-width: 240px;
+  position: relative;
 }
 
-/* Detail mode: full-screen preview */
+/* Detail mode: full-screen preview, draggable */
 .body.show-detail {
   flex-direction: column;
+  --wails-draggable:drag;
 }
 .body.show-detail .results,
 .body.show-detail .summary {
@@ -247,6 +248,7 @@ html, body {
 .body.show-detail .back-btn {
   opacity: 1;
   pointer-events: auto;
+  --wails-draggable:no-drag;
 }
 .back-btn:hover {
   background: rgba(17, 19, 25, 0.14);
