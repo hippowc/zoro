@@ -6,7 +6,7 @@
   var resultsEl = document.getElementById("results");
   var previewEl = document.getElementById("preview");
   var statusEl = document.getElementById("status");
-  var hideBtn = document.getElementById("hide");
+  var clearBtn = document.getElementById("clear");
 
   var bridge = window.go && window.go.main && window.go.main.App;
   if (!bridge) {
@@ -65,6 +65,10 @@
     statusEl.textContent = text || "";
   }
 
+  function updateClear() {
+    clearBtn.classList.toggle("is-visible", queryEl.value.length > 0);
+  }
+
   function showResults() {
     bodyEl.classList.remove("is-hidden");
     bodyEl.classList.add("show-results");
@@ -92,9 +96,9 @@
     active = -1;
     resultsEl.innerHTML = "";
 
+    // 没有匹配时不展示结果区，避免空白面板。
     if (!current.length) {
-      showResults();
-      resultsEl.innerHTML = '<li class="empty">没有匹配条目</li>';
+      hideBody();
       return;
     }
 
@@ -214,8 +218,17 @@
 
   var debounceTimer = null;
   queryEl.addEventListener("input", function () {
+    updateClear();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(doQuery, 80);
+  });
+
+  clearBtn.addEventListener("click", function () {
+    queryEl.value = "";
+    updateClear();
+    hideBody();
+    setStatus("");
+    queryEl.focus();
   });
 
   document.addEventListener("keydown", function (e) {
@@ -245,11 +258,10 @@
     }
   });
 
-  hideBtn.addEventListener("click", hide);
-
   bridge.Status()
     .then(function (s) { setStatus(s); })
     .catch(function (e) { setStatus("读取状态失败：" + e); });
 
+  updateClear();
   queryEl.focus();
 })();
