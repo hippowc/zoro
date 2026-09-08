@@ -1,0 +1,98 @@
+# zoro 决策记录（facts/decisions.md）
+
+> 只记「为什么这么选、否决了什么、代价、何时重新考虑」。缺了它，后人会“顺手优化”掉结论。
+> 状态未单列时表示仍在生效；废除项见文末。
+
+## AD-1 技术栈：Go + Wails v2
+
+- **选择**：core 用 Go package；桌面 Launcher 用 Wails v2 + 系统 WebView 自绘浮窗；CLI 是裸 Go main。
+- **否决**：Rust + Tauri（本项目上一版技术栈）。
+- **代价**：
+  - macOS 桌面端必须在本机 Xcode 工具链下构建，无法在 Linux 交叉编译 macOS 版。
+  - Wails 透明窗口 / 透明 WebView 在不同 macOS 版本有已知行为差异（见 `facts/pitfalls.md`）。
+- **何时重新考虑**：若需要三平台原生控件一致性、或必须完全脱离 Xcode 的发布链路时，重新评估 Tauri v2 / egui / 纯 Web 前端。
+
+## AD-2 功能模型延续 v10（统一 Block / manifest v2）
+
+- **选择**：功能场景与设计方案延续并精简 v10（统一 Block 模型 / Workspace 单模型 / manifest v2），仅技术栈与目录落地调整。
+- **否决**：按“库类型”分裂多个模型、给 `@index` 特殊入口、存储块 end 位置。
+- **理由**：所有标签平级为块，边界到下一个标签 / EOF 即可，现场推导而**不存 end**，降低一致性负担。
+- **何时重新考虑**：出现需要跨编辑稳定引用（如块内锚点跳转）时，重新引入“稳定条目 id”，届时与身份三元组并存。
+
+## AD-3 一级对象是 Workspace（单一模型）
+
+- **选择**：一律由 `zoro.toml` 声明库集合；单库 = `libraries` 长度为 1，无特殊入口。
+- **否决**：`ZORO_ROOT` / `ZORO_LIBS` 环境变量入路、`./` 单个库快捷模式。
+- **理由**：一个模型覆盖所有规模；库名必须出现在展示路径 / 候选行 / URL 中，身份三元组 `(库名, path, start)` 不串库。
+- **何时重新考虑**：若单库工作流占绝对多数且“零配置”诉求压倒显式声明时，可加“隐式单库”体验层，但不得改 manifest 模型。
+
+## AD-4 内容契约：Markdown 唯一源 + 目录自由
+
+- **选择**：内容只有 Markdown（+ `@` 指令）；HTML 是渲染产物；内容目录零约束，唯一技术约束是 `@` 标记行格式。
+- **否决**：把 HTML / 数据库行 / 专有格式纳入内容源；给内容目录强加固定树状结构。
+- **理由**：文本可审计、可 git、可渲染多 target；作者只需维护 Markdown。
+- **何时重新考虑**：出现强结构化 / 富媒体独占场景时，经 `Extractor` 插件转换为块，不改 Block 模型。
+
+## AD-5 策展型知识库（不把“全盘文件”当主路径）
+
+- **选择**：默认只搜 `zoro.toml` 已声明库根下的 `*.md` / `*.mdx`；跳过隐藏目录。
+- **否决**：“扫描本地所有文件”作为搜索主路径。
+- **理由**：意图面由作者显式声明（搜索词），召回质量可控；非 Markdown / 库外文件不进核心搜索面。
+- **何时重新考虑**：需要扩展知识源时按 `Collector → Extractor → IndexBackend` 插件抽象接入，不污染 core；不必要时不做。
+
+## AD-6 三面搜索与演进顺序
+
+- **选择**：`index`（主面）→ `title`（召回面）→ `raw`（兜底面）；P0/P1 只落 index terms 主面，title/raw 作为显式扩展点占位。
+- **否决**：一开始就上全文检索；让 title/raw 与 index 同权重竞争。
+- **理由**：index 是作者主动声明的“何时被找到”，ROI 最高；全文引擎（bleve/zinc）延后到 P4 再定。
+- **何时重新考虑**：索引术语覆盖不足、查准/召回明显受损时，再引入 title 面与 P4 全文兜底面。
+
+## AD-7 扩展走 Go interface，不做动态加载
+
+- **选择**：展示扩展 = 新 main package 依赖 core；能力扩展 = core 定义 `Action` / `SyncProvider` / `Cipher` 接口。
+- **否决**：插件动态加载、脚本化插件系统。
+- **理由**：先单仓库 deliver；动态加载的复杂度（版本、安全、分发）在单平台 MVP 阶段不划算。
+- **何时重新考虑**：出现第三方贡献插件、或需要 runtime 安装/卸载插件时再评估。
+
+## AD-8 Action 权限分级与默认动作
+
+- **选择**：默认只保证 `Copy` + `Preview`/`Open`（三平台一致）；`Execute` 须显式确认；`Insert` 回填最后做。
+- **否决**：默认执行 `@shell`；默认模拟输入回填。
+- **理由**：外部来源内容安全默认拒绝；`Insert` 在 macOS 需 Accessibility、Wayland 基本不可行，强推会牺牲一致性与体验。
+- **何时重新考虑**：当“回填”成为高频需求、且目标平台集中在 macOS/Windows 时，再做平台可选回填（Launcher v2 阶段）。
+
+## AD-9 平台分发策略
+
+- **选择**：开发/自用 = 本地构建 + ad-hoc 签名（免费）；CLI 大众分发 = Homebrew formula；GUI 大众分发 = Developer ID 签名 + 公证。
+- **否决**：MVP 阶段就上 Developer ID + 公证、或让用户自己装 Wails CLI/Go 工具链。
+- **理由**：用户要求“下载即用”；大众化再投入正式签名与公证。
+- **何时重新考虑**：进入大众分发 / 需要 GitHub Actions 自动签名公证时，切换到 Developer ID + notarytool 工作流。
+
+## AD-10 Launcher 热键与窗口行为
+
+- **选择**：Carbon `RegisterEventHotKey` 注册 **Cmd+Shift+Z** 全局唤起居/隐藏；无边框、置顶、半透明浮窗；Esc 隐藏，关闭=隐藏到后台。
+- **否决**：辅助功能/输入监控权限方案做“无边框输入框”回填。
+- **理由**：热键唤起无需特殊权限；回填才需要 Accessibility。
+- **何时重新考虑**：若 Cmd+Shift+Z 与用户软件冲突，把热键做成可配置项（配置进 `~/.zoro` 而不是硬编码）。
+
+## AD-11 macOS 透明窗口实现
+
+- **选择**：`WebviewIsTransparent: true` + `WindowIsTranslucent: false` + `BackgroundColour.A=0` + `Appearance: Aqua`；玻璃质感交给前端 CSS（rgba + backdrop-filter）。
+- **否决**：`WindowIsTranslucent: true` 的原生 NSVisualEffectView 方案。
+- **理由**：后者在较新 macOS 上会在 WebView 后渲染出不透明深色/褐色块，破坏“只有面板有背景、其余全透明”的目标。
+- **何时重新考虑**：若后续要求“原生 behind-window 模糊”且目标 macOS 版本表现稳定，可重新验证 `WindowIsTranslucent` + 新 Wails 版本。
+
+## 待定项（backlog）
+
+- tag / facet：标签名即 facet；按 facet 过滤的 query（如 `-t video`）待做。
+- 同主题块聚合：`index` 与同主题 `shell`/`video` 并排命中是否聚合成「主题行」，留待 P3 交互设计。
+- 稳定条目 id：暂用 `(库名, path, start)`；跨编辑引用跳转需再引入内容锚点。
+- 库级 `include`/`exclude` glob、`recursive`、`follow_symlinks` 等范围细化待落地。
+
+## 已废除 / 占名不实现
+
+- `ZORO_ROOT` / `ZORO_LIBS` → `zoro.toml`
+- `@cmd` → `@shell`
+- `@run` → 行为外移（Action 分级）
+- `@lang` → fence info 已带语言
+- 扩展指令 `@alias` / `@desc` / `@ref` / `@hidden` 占名不实现
