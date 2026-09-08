@@ -4,17 +4,25 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"zoro/core"
 )
 
 // App is the Wails-bound bridge between the launcher UI and zoro core.
-// It only exposes the Launcher v1 action surface: Query + Preview/Render + Copy.
+// It exposes the Launcher v1 action surface: Query + Preview/Render + Copy + Open.
 type App struct {
-	ctx context.Context
-	ws  *core.Workspace
+	ctx    context.Context
+	ws     *core.Workspace
+	wsErr  error
+	wsPath string
+
+	windowVisible    bool
+	unregisterHotkey func()
 }
 
 // NewApp creates the bound app.
@@ -23,13 +31,26 @@ func NewApp() *App { return &App{} }
 // startup loads the zoro workspace (cold-start first, auto rebuild when stale).
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	ws, err := core.LoadWorkspace(launcherWorkspacePath())
+	a.wsPath = launcherWorkspacePath()
+	ws, err := core.LoadWorkspace(a.wsPath)
 	if err != nil {
-		// Workspace errors surface on every query instead of crashing the launcher.
+		// Workspace errors surface in the UI instead of crashing the launcher.
 		a.ws = nil
+		a.wsErr = err
 		return
 	}
 	a.ws = ws
+}
+
+// Status returns a short human-readable line about the loaded workspace.
+func (a *App) Status() string {
+	if a.wsErr != nil {
+		return fmt.Sprintf("读取工作区失败（%s）：%v", a.wsPath, a.wsErr)
+	}
+	if a.ws == nil {
+		return fmt.Sprintf("未加载工作区（%s）", a.wsPath)
+	}
+	return fmt.Sprintf("%s · %d 个知识库", a.wsPath, len(a.ws.Libraries))
 }
 
 // Query returns ranked candidates from the workspace (empty query = browse all).
@@ -43,7 +64,7 @@ func (a *App) Query(q string) []core.Candidate {
 // LoadRaw cuts a block's raw Markdown on demand by (library, path, start).
 func (a *App) LoadRaw(library, path string, start int) (string, error) {
 	if a.ws == nil {
-		return "", fmt.Errorf("workspace not loaded")
+		return "", a.workspaceErr()
 	}
 	return a.ws.LoadRaw(library, path, start)
 }
@@ -53,17 +74,83 @@ func (a *App) RenderHTML(raw string) (string, error) {
 	return core.RenderMarkdownHTML(raw)
 }
 
+// ResolveSource maps a candidate's (library, path) to a source file path.
+func (a *App) ResolveSource(library, path string) (string, error) {
+	if a.ws == nil {
+		return "", a.workspaceErr()
+	}
+	for _, lib := range a.ws.Libraries {
+		if lib.Name == library {
+			return filepath.Join(lib.Root, filepath.FromSlash(path)), nil
+		}
+	}
+	return "", fmt.Errorf("library not found: %s", library)
+}
+
+// OpenSource opens the candidate's source Markdown file with the system app.
+func (a *App) OpenSource(library, path string) (string, error) {
+	p, err := a.ResolveSource(library, path)
+	if err != nil {
+		return "", err
+	}
+	if err := launchFile(p); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
 // Copy puts text on the system clipboard (Copy action; no special permission).
 func (a *App) Copy(text string) error {
 	if a.ctx == nil {
 		return fmt.Errorf("app not started")
 	}
-	return runtime.ClipboardSetText(a.ctx, text)
+	return wailsruntime.ClipboardSetText(a.ctx, text)
+}
+
+// Hide hides the launcher window while the process keeps running.
+func (a *App) Hide() {
+	if a.ctx != nil {
+		wailsruntime.WindowHide(a.ctx)
+	}
+	a.windowVisible = false
+}
+
+func (a *App) workspaceErr() error {
+	if a.wsErr != nil {
+		return a.wsErr
+	}
+	return fmt.Errorf("workspace not loaded")
 }
 
 func launcherWorkspacePath() string {
 	if p := os.Getenv("ZORO_WORKSPACE"); p != "" {
 		return p
 	}
+	// 先看当前目录（CLI 习惯），再看用户主目录（双击 .app 启动时 cwd 通常是 /）。
+	if _, err := os.Stat("zoro.toml"); err == nil {
+		return "zoro.toml"
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		p := filepath.Join(home, "zoro.toml")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
 	return "zoro.toml"
+}
+
+func launchFile(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open %q: %w", path, err)
+	}
+	return nil
 }

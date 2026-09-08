@@ -66,15 +66,43 @@ zoro/
 └── agents.md        # 开发规范（单一事实源）
 ```
 
-## 桌面 Launcher
+## 桌面 Launcher（macOS MVP）
+
+Wails 桌面前端位于 `ext/zoro-launcher`（独立 Go module）。当前 MVP 先交付 macOS：
+
+- 全局热键 **Cmd+Shift+Z** 唤起/隐藏浮窗（Carbon `RegisterEventHotKey` 实现，无需辅助功能/输入监控权限）
+- 无边框、置顶、半透明浮窗；`Esc` 隐藏，关闭窗口=隐藏到后台
+- 查询 + 选中预览 + `↵` 复制 + `⌘↵` 打开源文件
+- 工作区查找顺序：`ZORO_WORKSPACE` → `./zoro.toml` → `~/zoro.toml`
+
+> 注意：Wails 应用必须使用 macOS 本机 Xcode 工具链构建，无法在 Linux/Windows 上交叉编译 macOS 版。
+
+在 Mac 上构建（Apple Silicon）：
 
 ```bash
+xcode-select --install                                  # 首次需安装 Command Line Tools
 cd ext/zoro-launcher
-go build -o zoro-launcher .
-# 或使用 Wails CLI：wails build
+./build-macos.sh                                        # 产物：build/bin/zoro-launcher.app
+open build/bin/zoro-launcher.app
 ```
 
-Launcher v1 MVP：全局热键唤起 + 无边框浮窗 + 查询 + 预览 + 复制（回填/执行受平台权限限制，见 `agents.md` §9/§14）。
+或手动：
+
+```bash
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+cd ext/zoro-launcher
+wails build -clean -platform darwin/arm64
+# Intel Mac 把 arm64 换成 amd64
+```
+
+首次运行被 Gatekeeper 拦截时：
+
+```bash
+xattr -cr build/bin/zoro-launcher.app
+open build/bin/zoro-launcher.app
+```
+
+Linux 侧仅作开发验证（不含全局热键）：`cd ext/zoro-launcher && go build .`
 
 ## 测试
 

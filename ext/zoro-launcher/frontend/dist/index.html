@@ -3,19 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>zoro launcher</title>
+    <title>zoro</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="shell">
-      <header class="top">
-        <input id="query" class="query" type="search" placeholder="搜索 zoro 库（如：git / 定投）…" autocomplete="off" />
+      <header class="top" style="--wails-draggable: drag">
+        <input id="query" class="query" type="search" placeholder="搜索 zoro 库（如：git / 定投）…"
+               autocomplete="off" style="--wails-draggable: no-drag" />
+        <button id="hide" class="icon-btn" title="隐藏（Esc）" style="--wails-draggable: no-drag">×</button>
       </header>
+
       <section class="body">
-        <ul id="results" class="results"></ul>
-        <article id="preview" class="preview"></article>
+        <ul id="results" class="results" style="--wails-draggable: no-drag"></ul>
+        <article id="preview" class="preview" style="--wails-draggable: no-drag"></article>
       </section>
-      <footer class="status" id="status">读取工作区…</footer>
+
+      <footer class="status">
+        <span id="status">启动中…</span>
+        <span class="hint">↵ 复制 · ⌘↵ 打开源文件 · Esc 隐藏</span>
+      </footer>
     </main>
     <script src="./app.js"></script>
   </body>

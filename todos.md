@@ -8,7 +8,8 @@
 - ✅ 技术栈迁移：Rust + Tauri → **Go + Wails v2**，agents.md 精简定稿为「第一版」
 - ✅ core 已迁移至 `core/`（Go package）：Block 统一标签模型 / Registry / manifest v2 / Workspace / 库级配置
 - ✅ CLI MVP 落地至 `cmd/zoro`：`add`（添加知识库并写回 zoro.toml）/ `search` / `preview` / `open`（打开源文件）/ `html` / `text` / `index`；`serve` 仍为 P2 占位
-- ✅ `ext/zoro-launcher` Wails 骨架：全局热键唤起留待 P3.5 接入，Query/Preview/Copy 桥接已就位
+- ✅ `ext/zoro-launcher` Wails 骨架：Query/Preview/Copy 桥接已就位
+- ✅ 桌面 Launcher macOS MVP 已就绪（待用户 Mac 实测）：Carbon 全局热键 Cmd+Shift+Z（无辅助功能/输入监控权限）+ 无边框置顶透明浮窗 + 查询/预览/复制/打开源文件
 - ✅ `go test ./...` 全绿（单测 + 集成）；示例工作区 `zoro index / search 定投 / preview 定投 / text 定投 / html 定投` 手动可用
 - 当前等价阶段：**P0 完成；P1 收尾完成**（Matcher 接口 + 高亮区间 / HTML·ANSI·纯文本三 target / manifest 文件级指纹 / CLI 子命令 / 库级配置接入运行时分派）
 - 下一阶段：P2 `zoro serve` 与 P3 CLI fzf + `@shell` Action（`allow_exec` helper 已就位，执行注册表到 P3 落地）
@@ -38,7 +39,7 @@
 
 | # | 任务 | 归属 | 说明 / 验收 |
 |---|------|------|-------------|
-| 9.5 | Launcher 单平台 Spike（先验证形态） | ext/zoro-launcher | Wails v2：常驻进程 + 全局热键 + 无边框浮窗 + 自绘列表；动作先只做「复制 + 打开渲染」，不做回填；跑通单平台（macOS 优先），确认体验成立 |
+| 9.5 | ✅ Launcher 单平台 Spike（代码就绪，待 Mac 实测体验） | ext/zoro-launcher | Wails v2：常驻进程 + Carbon 全局热键（Cmd+Shift+Z）+ 无边框透明浮窗 + 自绘列表；动作「复制 + 打开渲染 + 打开源文件」；不回填；`./build-macos.sh` 在 Mac 上构建 |
 | 9.6 | Launcher 三平台 + 回填（后续，视 Spike 结论） | ext/zoro-launcher | 回填按平台可选：macOS/Windows 可行，X11 凑合、Wayland 降级；GUI 大众分发走 Developer ID + 公证，延后到真正大众化阶段 |
 | 10 | 全文搜索 | core | 三面搜索之正文兜底面（bleve/zinc 再定）：`index`=精确面、`title`=召回面、`raw`=兜底面（见 agents.md §7） |
 | 11 | 静态站点发布 | ext/zoro-publish | 把库导出为静态 HTML + 站点搜索（pagefind）；个人站点/分享场景 |
