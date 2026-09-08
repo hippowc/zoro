@@ -148,13 +148,17 @@ html, body {
 /* Summary inside body - only visible when results exist */
 .summary {
   flex: none;
-  padding: 4px 8px;
+  padding: 6px 12px;
   color: var(--muted);
   font-size: 12px;
-  opacity: 0.85;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-  border-bottom: 1px solid var(--stroke-soft);
-  margin-bottom: 4px;
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 16px rgba(31, 35, 46, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
 }
 
 /* 结果区只在有内容时展开收拢，不再预留空白 */
@@ -172,14 +176,21 @@ html, body {
   pointer-events: auto;
 }
 .body.show-preview { 
-  flex-direction: column;
+  flex-direction: row;
 }
 .body.show-preview .results {
-  flex: 0 0 auto;
-  max-height: 45%;
+  flex: 0 0 240px;
+  width: 240px;
+  min-width: 240px;
 }
-.body.show-preview .preview { display: block; flex: 1; min-height: 0; }
+.body.show-preview .preview { display: block; flex: 1; min-width: 0; }
 .body.show-results .preview { display: none; }
+/* Results-only mode: constrain width to match preview mode total */
+.body.show-results .results {
+  flex: 0 0 240px;
+  width: 240px;
+  min-width: 240px;
+}
 
 /* Detail mode: full-screen preview */
 .body.show-detail {
@@ -290,11 +301,11 @@ html, body {
   display: none;
 }
 
-/* Detail mode: hide search box, make preview draggable */
+/* Detail mode: hide search box, make body draggable */
 .shell.show-detail .top {
   display: none;
 }
-.shell.show-detail .body.show-detail .preview {
+.shell.show-detail .body.show-detail {
   --wails-draggable: drag;
 }
 .shell.show-detail .body.show-detail .back-btn {
