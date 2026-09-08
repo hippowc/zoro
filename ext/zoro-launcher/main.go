@@ -31,6 +31,9 @@ func main() {
 		// Background alpha 0 keeps the translucent/rounded shell in full control.
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 0},
 		AssetServer:      &assetserver.Options{Assets: assets},
+		// Enable window dragging via CSS custom property
+		CSSDragProperty: "--wails-draggable",
+		CSSDragValue:    "drag",
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
 			Appearance:           mac.NSAppearanceNameAqua,

@@ -145,18 +145,16 @@ html, body {
   color: var(--fg);
 }
 
-/* Summary inside body - positioned at bottom-left of results */
+/* Summary above results */
 .summary {
-  position: absolute;
-  bottom: 4px;
-  left: 8px;
-  padding: 2px 8px;
+  flex: none;
+  padding: 4px 12px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   background: var(--glass);
-  border-radius: 6px;
-  z-index: 5;
-  pointer-events: none;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--stroke);
+  border-bottom: none;
 }
 
 /* 结果区只在有内容时展开收拢，不再预留空白 */
@@ -190,6 +188,12 @@ html, body {
 .body.show-results .preview { display: none; }
 .body.show-results .results {
   position: relative;
+}
+/* Ensure results is completely hidden when body is hidden */
+.body.is-hidden .results,
+.body.is-hidden .preview,
+.body.is-hidden .summary {
+  display: none !important;
 }
 
 /* Detail mode: full-screen preview, draggable */
