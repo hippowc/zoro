@@ -21,12 +21,14 @@
       <section id="body" class="body is-hidden">
         <div id="summary" class="summary"></div>
         <ul id="results" class="results" style="--wails-draggable: no-drag"></ul>
-        <article id="preview" class="preview" style="--wails-draggable: no-drag"></article>
+        <article id="preview" class="preview" style="--wails-draggable: no-drag">
+          <button id="backBtn" class="back-btn" type="button" title="返回搜索" aria-label="返回搜索">←</button>
+        </article>
       </section>
 
       <footer class="status">
         <span id="status">启动中…</span>
-        <span class="hint">↵ 弹出窗口 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏</span>
+        <span class="hint">↵ 详情 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏/返回</span>
       </footer>
     </main>
     <script src="./app.js"></script>

@@ -23,9 +23,11 @@
   var statusEl = document.getElementById("status");
   var clearBtn = document.getElementById("clear");
   var summaryEl = document.getElementById("summary");
+  var backBtn = document.getElementById("backBtn");
 
   var current = [];
   var active = -1;
+  var detailMode = false; // Track if we're in detail mode
 
   function escapeHtml(s) {
     return String(s == null ? "" : s)
@@ -99,11 +101,24 @@
 
   function hideBody() {
     bodyEl.classList.add("is-hidden");
-    bodyEl.classList.remove("show-results", "show-preview");
+    bodyEl.classList.remove("show-results", "show-preview", "show-detail");
     resultsEl.innerHTML = "";
     previewEl.innerHTML = "";
     current = [];
     active = -1;
+    detailMode = false;
+  }
+
+  function showDetailMode() {
+    detailMode = true;
+    bodyEl.classList.remove("is-hidden", "show-results", "show-preview");
+    bodyEl.classList.add("show-detail");
+  }
+
+  function exitDetailMode() {
+    detailMode = false;
+    bodyEl.classList.remove("show-detail");
+    bodyEl.classList.add("show-results");
   }
 
   function renderResults(candidates) {
@@ -161,12 +176,19 @@
 
     var c = current[i];
     var idx = i;
-    showPreview();
+    
+    // If in detail mode, just update preview content without changing view
+    if (!detailMode) {
+      showPreview();
+    }
+    
     bridge.LoadRaw(c.library, c.path, c.start)
       .then(function (raw) { return bridge.RenderHTML(raw || ""); })
       .then(function (html) {
         if (active !== idx) return;
-        previewEl.innerHTML = html;
+        // Preserve back button when updating preview
+        var backBtnHtml = previewEl.querySelector('.back-btn') ? previewEl.querySelector('.back-btn').outerHTML : '';
+        previewEl.innerHTML = backBtnHtml + html;
         setStatus("");
       })
       .catch(function (e) {
@@ -262,11 +284,18 @@
 
   document.addEventListener("keydown", function (e) {
     var meta = e.metaKey || e.ctrlKey;
+    
+    // Esc: exit detail mode or hide launcher
     if (e.key === "Escape") {
       e.preventDefault();
-      hide();
+      if (detailMode) {
+        exitDetailMode();
+      } else {
+        hide();
+      }
       return;
     }
+    
     if (e.key === "ArrowDown") {
       e.preventDefault();
       move(1);
@@ -282,7 +311,13 @@
       if (meta) {
         openActive();
       } else {
-        popoutActive();
+        // Enter switches to detail mode
+        ensureActive();
+        showDetailMode();
+        // Re-select current item to update preview
+        if (active >= 0 && active < current.length) {
+          select(active);
+        }
       }
       return;
     }
@@ -293,6 +328,15 @@
       return;
     }
   });
+
+  // Back button click handler
+  if (backBtn) {
+    backBtn.addEventListener("click", function () {
+      if (detailMode) {
+        exitDetailMode();
+      }
+    });
+  }
 
   bridge.Status()
     .then(function (s) { setStatus(s); })
