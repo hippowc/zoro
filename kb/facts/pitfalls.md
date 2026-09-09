@@ -103,19 +103,32 @@
 
 ## P-13 Launcher 常驻持有 bbolt 独占锁 → CLI 卡死 / 重载工作区自锁死
 
-- **状态**：active（2026-09-09 设计调研中发现，尚未修）
-- **触发**：① Launcher 运行时（常驻进程，`HideWindowOnClose`）在终端跑 `zoro search / preview / index` 操作**同一个库**；② 启动第二个 Launcher 实例；③ 将来「添加库后重载 workspace」时没有先 `Close()` 旧的。
+- **状态**：fixed-in-2026-09-09（`core/store.go` + `core/library.go`）
+- **触发**：① Launcher 运行时（常驻进程，`HideWindowOnClose`）在终端跑 `zoro search / preview / index` 操作**同一个库**；② 启动第二个 Launcher 实例；③ 「添加库后重载 workspace」。
 - **症状**：① CLI **永久卡死**——无输出、无报错、只能 Ctrl-C；② 第二个实例同样卡死；③ Launcher 挂死自己（同进程不同 fd 也互斥）。全程没有任何错误信息，看起来像「程序坏了」。
-- **根因**：`core.OpenStore` 调 `bolt.Open(path, 0o600, nil)`（`core/store.go:28-42`），`nil` 选项 → `Options.Timeout = 0`；bbolt 的 `flock`（`bolt_unix.go:17-45`）在 timeout 为 0 时是**无限重试循环**（每 50ms 一次，永不返回错误）。而 `Library.Query → ensureFresh()` 首次就会 `OpenStore`（`core/library.go:316-341`），store 之后**常驻不释放**（只有显式 `Library.Close()` / `Workspace.Close()` 才关）。RW 模式取的是 `LOCK_EX` 独占锁。
-- **修法**（最小两步，完整推导见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` §3）：
-  1. `bolt.Open` 传 `&bolt.Options{Timeout: 300 * time.Millisecond}`，让争用**快速失败**并给出「另一个 zoro 进程正持有该库索引」的明确错误；
-  2. Launcher 不长期持有 store：`Hide()` 时 `ws.Close()`、唤起时重开（或每次 bridge 调用内 Open→用→Close）。
-  ⚠️ 配套必做：`ensureFresh()` 现在**吞掉所有错误**（`library.go:317-320` 空 if 体），加了超时后症状会从「卡死」变成「静默返回旧索引 = 搜不到刚写的内容」，更难查。必须让该错误可观测（如 `Library.LastRefreshErr` + `Status()` 带出）。
+- **根因**：`core.OpenStore` 曾调 `bolt.Open(path, 0o600, nil)`，`nil` 选项 → `Options.Timeout = 0`；bbolt 的 `flock`（`bolt_unix.go:17-45`）在 timeout 为 0 时是**无限重试循环**（每 50ms 一次，永不返回错误）。而 `Library.Query → ensureFresh()` 首次就会 `OpenStore`，store 之后**常驻不释放**。RW 模式取的是 `LOCK_EX` 独占锁。
+- **修法（已落地）**：
+  1. `bolt.Open` 传 `&bolt.Options{Timeout: 300 * time.Millisecond}`，把 `bolt.ErrTimeout` 映射成 `ErrStoreLocked`（「知识库索引正被另一个 zoro 进程占用（请先退出它）」）——争用**快速失败且有名字**。
+  2. `Library` 从不跨调用持有 store：唯一入口是 `withStore(fn)`，Open → 用 → Close 在一次调用内完成。常驻进程因此不再有「忘记关」的状态。
+  3. ⚠️ **配套必做**：`Library.Query` 是「尽力刷新」——拿不到锁就用内存里的块继续搜、**不报错**。加了超时之后症状从「卡死」变成「静默返回旧索引 = 搜不到刚写的内容」，更难查。所以 Launcher 的 `Status()` 显式 `RefreshAll()` 一次并把错误拼进返回串（`⚠️ 索引未刷新（结果可能是旧的）`）；那是用户唯一能知道这件事的地方。
+  4. 内存指纹镜像的「已加载」判据是 `l.fps != nil` 而**不是** `len(l.fps) > 0`（空库的镜像 legitimately 是空 map，用 len 判会让空库每次都全量重扫）。
 
 ## P-14 想在 macOS 上「拖文件夹进搜索框添加库」——Wails v2 做不到
 
-- **状态**：active（框架限制，非本项目 bug）
+- **状态**：active（框架限制，非本项目 bug；已按修法落地）
 - **触发**：在 Launcher 里实现文件/目录拖拽（`OnFileDrop`），期望 macOS 上可用。
 - **症状**：`options.Options` 里找不到 `EnableDragAndDrop`；即使注册了 `runtime.OnFileDrop`，拖拽进来也**毫无反应**。
 - **根因**：v2.15.0 的 drop 分支依赖 `window.chrome?.webview?.postMessageWithAdditionalObjects`（`internal/frontend/runtime/runtime_prod_desktop.js` 的 `CanResolveFilePaths`），那是 **Windows WebView2 专有 API**，WKWebView 上恒为 false；且 `pkg/options` 只有 `DisableResize`，没有开关可打开。
-- **修法**：改用原生目录选择框 `runtime.OpenDirectoryDialog(ctx, OpenDialogOptions{...})`（`pkg/runtime/dialog.go:33`，**返回 `""` 表示取消，不是 error**）。⚠️ darwin 上它以 **sheet 形式挂在主窗口下**（`WailsContext.m:658`），对无边框 76px 浮窗的观感需 Mac 实测；兜底是让用户 ⌘V 粘贴路径。原生多窗口/更好的 drop 等 Wails v3（`../../todos.md` 9.6）。
+- **修法**：改用原生目录选择框 `runtime.OpenDirectoryDialog(ctx, OpenDialogOptions{...})`（`pkg/runtime/dialog.go:33`，**返回 `""` 表示取消，不是 error**）。已落地为桥接方法 `App.PickDirectory`（`ext/zoro-launcher/app.go`），由 `/lib add` 调用；前端把 `""` 当**取消**处理（`statusText = "已取消（没有选择目录）"`），绝不当错误显示成红字。⚠️ darwin 上它以 **sheet 形式挂在主窗口下**（`WailsContext.m:658`），对无边框 76px 浮窗的观感需 Mac 实测；兜底是让用户 ⌘V 粘贴路径。原生多窗口/更好的 drop 等 Wails v3（`../../todos.md` 9.6）。
+
+## P-15 命令面出现空面板 = 用户眼里「工具坏了」
+
+- **状态**：active（预防性；2026-09-09 由 jsdom 冒烟测试当场抓到）
+- **触发**：给 `/verb` 命令面加新形态时，让「匹配不上」直接返回空数组；或写参数匹配规则时把「多打的实参」判成合法。
+- **症状**：输入 `/lib add` 回车，跑的是**列库**而不是加库；或输入 `/lib xyz` 后面板整个消失、什么都不发生、没有任何提示。两种都没有报错。
+- **根因**：① 候选列表是 `x-if="items.length > 0"` 驱动的，空数组 = 整块 DOM 被移出，静默失败；② 零参形态（`args: []`）如果用「实参数 ≥ 形态参数数」判 exact，会把任意多余实参吞掉，于是 `/lib add` 同时匹配上 `/lib`（exact）与 `/lib add <name>`（completion），而 exact 排在前面。
+- **修法**：
+  1. `buildCommandItems` 有**第二遍兜底**：verb 对得上但实参对不上时，列出该 verb 的全部形态，绝不返回空数组。
+  2. `matchArgs` 里多打的实参**只有末尾是占位符的形态能吸收**，否则判 null。
+  3. 排序 = exact 优先，同档内**参数多的形态优先**（`/lib add notes` 必须压过 `/lib`）。
+  4. 改这块必须跑 jsdom 冒烟测试（`/tmp/lcheck/test.js` 的 [11]–[15] 节，不属于仓库）：候选排序是纯派生逻辑，只有断言能守住它。

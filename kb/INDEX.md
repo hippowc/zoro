@@ -14,8 +14,10 @@
 | 改 core（模型 / analyze / 查询 / 渲染 / 扩展接口） | `facts/architecture.md` → `facts/decisions.md` | `tools/build-test.md` |
 | 改 CLI 或 Web / 跑测试验证 | `tools/build-test.md` | `tools/verify.md`；`facts/pitfalls.md` |
 | 构建 / 发布 macOS Launcher | `tools/launcher-build-release.md` → `skills/ship-launcher-release.md` | `facts/pitfalls.md` |
-| 改 Launcher 前端（Tailwind 样式 / Alpine 状态 / 窗口尺寸） | `../ext/zoro-launcher/frontend/README.md` → `tools/launcher-build-release.md`（前端构建节） | `facts/pitfalls.md` P-6…P-14；`facts/decisions.md` AD-12 |
-| 给 Launcher **加新能力**（输入框命令 / 片段捕获 / 视图扩展 / 脑图） | `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md`（含已核验源码事实 F-1…F-18、禁令清单、待拍板 D1–D6） | `../todos.md` 看板 5.5 / 9.8–9.11；`facts/pitfalls.md` P-13、P-14 |
+| 改 Launcher 前端（Tailwind 样式 / Alpine 状态 / 窗口尺寸） | `../ext/zoro-launcher/frontend/README.md` → `tools/launcher-build-release.md`（前端构建节） | `facts/pitfalls.md` P-6…P-15；`facts/decisions.md` AD-12 |
+| 给 Launcher **加命令 / 加视图**（`/lib`、`/reindex`、`/theme` 这一类） | `../ext/zoro-launcher/frontend/README.md`（命令面节：两步配方）→ `tools/launcher-build-release.md`（命令面节：已实现清单与四条不变量） | `facts/decisions.md` AD-17；`facts/pitfalls.md` P-15 |
+| 给 Launcher 加**尚未落地**的能力（片段捕获 / 脑图视图 / 删除语义） | `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md`（已核验源码事实 F-1…F-18、禁令清单） | `../todos.md` 看板 9.8–9.11；`facts/decisions.md` 待定项 D5 |
+| **写** Markdown 内容（加块 / 改块 / 删块 / 加库） | `facts/architecture.md`（写入层：`core/write.go`、三条写定律 L1–L3）→ `facts/decisions.md` AD-15 / AD-16 | `tools/cli-usage.md`；`facts/pitfalls.md` P-13 |
 | 配置 Launcher UI 主题与快捷键 | `tools/launcher-build-release.md`（UI 主题配置节） | `journal/2026-09-08-launcher-ui-enhancements.md` |
 | 排查询询失败 / 透明窗口 / Gatekeeper / CLI 卡住不出结果 等已知坑 | `facts/pitfalls.md` | `facts/decisions.md`（相关决策） |
 | 运行验收清单 | `tools/verify.md` | `scripts/verify.sh` |

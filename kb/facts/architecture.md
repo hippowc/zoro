@@ -104,26 +104,23 @@ git reset --hard <commit>
 - **元数据是派生物**：可删、可重建、幂等；真相永远在 Markdown + `@` 标签里。`.zoro/` 默认 gitignore。
 - 需要正文时按 `(库名, path, start)` 现场截取；元数据**不存 end、不存正文副本、不存配置**。
 
-### 存储结构（schema 2，bbolt）
+### 存储结构（bbolt，`StoreSchema = 1`）
 
 路径：`<库根>/.zoro/zoro.db`，**一个库一份**（配置了 `data_dir` 时为 `<data_dir>/<库名>/zoro.db`）；workspace 组织关系由 `zoro.toml` 承载。
 
-- 容器是 **bbolt**（`core/store.go`），三个 bucket：`meta`（库名/root/schema/生成时间）、`blocks`（块记录）、`fingerprints`（文件指纹）。
-- bucket 里的值仍是 JSON 编码的记录，**块记录形状**如下（`core/meta.go` 的 `ManifestBlock`）：
+- 容器是 **bbolt**（`core/store.go`），三个 bucket：`meta`（`schema` / `library`）、`blocks`（块记录）、`fingerprints`（文件指纹）。
+- ⚠️ **两个 schema 号不是同一个东西**，别混（2026-09-09 本文档就写错过）：
+  - `core/store.go: StoreSchema = 1` —— 写进 bbolt `meta` bucket 的 `schema` 键，是**容器**版本。
+  - `core/meta.go: Schema = 2` —— 遗留 `.zoro/meta.json` 那个**整文件 manifest** 的版本；bbolt 里没有它。
+- `blocks` bucket 是「一个键一条块记录」，值是 `ManifestBlock` 的 JSON（**没有** schema / library 字段，库名来自 `meta` bucket）：
 
 ```json
-{
-  "schema": 2,
-  "library": { "name": "sanji", "root": "/data/kb/sanji" },
-  "generated_at": "1788166910",
-  "blocks": [
-    { "title": "Git 丢弃本地修改", "kind": "index",
-      "index": "git checkout reset 丢弃 还原", "path": "git/常用操作.md", "start": 3 },
-    { "title": "Git 丢弃本地修改", "kind": "shell",
-      "index": "git checkout reset 丢弃 还原", "path": "git/常用操作.md", "start": 5,
-      "shell": { "lang": "bash", "lines": [7, 8] } }
-  ]
-}
+{ "title": "Git 丢弃本地修改", "kind": "index",
+  "index": "git checkout reset 丢弃 还原", "path": "git/常用操作.md", "start": 3 }
+
+{ "title": "Git 丢弃本地修改", "kind": "shell",
+  "index": "git checkout reset 丢弃 还原", "path": "git/常用操作.md", "start": 5,
+  "shell": { "lang": "bash", "lines": [7, 8] } }
 ```
 
 - `library.name` 与 `zoro.toml` 声明一致（加载校验）；`root` 仅作记录。
@@ -149,8 +146,9 @@ git reset --hard <commit>
 - **脏检查已是文件级指纹**：`(path, mtime 纳秒, size)`（`FileFingerprint`）比对出 dirty / removed 集合，**只重扫脏文件**并保留其余块（`rebuildIncrementalStore`）；两者皆空则直接从 store 读块，不扫盘。`Analyze(force=true)` 才全量重扫。
 - ⚠️ 指纹只看 mtime+size，**无内容哈希、无 watcher** → 同 size 同 mtime 的改动不可见；写入内容后应显式 `Analyze(false)`，不要依赖隐式刷新。
 - store 损坏 / schema 不匹配 → 自动重建（派生数据可丢）。
-- **写入原子性现状**：bbolt 事务自身保证 store 一致；但 `WriteWorkspaceConfig` 是**非原子**的 `os.WriteFile`（`core/config.go`），而 core 里已有的 `atomicWrite`（tmp+rename）只有一个死代码调用者。
-- ⚠️ **存储生命周期与锁**：`OpenStore` 用 `bolt.Open(path, 0600, nil)`，`Timeout=0` 意味着抢不到 flock 时**无限重试、永不报错**；store 一经打开常驻不释放。常驻型前端（Launcher）因此会独占锁死同库的 CLI。详见 `facts/pitfalls.md` **P-13**（active）。
+- **写入原子性现状（2026-09-09 起）**：声明文件（`zoro.toml`）的两个写入点 `WriteWorkspaceConfig` 与 `AddLibraryToWorkspace` 都走 `atomicWriteFile`（同目录 tmp + rename），不存在半截文件。
+  ⚠️ **内容写入（`core/write.go`）故意不用 tmp+rename**：追加是单次 `O_APPEND`，改写是就地 `Truncate`+`Write`。用户的 Markdown 常常正在编辑器里开着，换 inode 会让编辑器的保存与我们的写入互相覆盖（写定律 L3，见 `write.go` 文件头）。
+- **存储生命周期与锁（P-13 已修）**：`OpenStore` 传 `&bolt.Options{Timeout: 300ms}`，抢不到 flock 时**快速失败**并返回 `ErrStoreLocked`（「知识库索引正被另一个 zoro 进程占用」），不再无限重试卡死 CLI；`Library` 从不跨调用持有 store，唯一入口是 `withStore(fn)`（用完即关）。`Library.Query` 是**尽力刷新**：拿不到锁就用内存里的块继续搜、不报错，所以常驻前端必须由 `Status()` 显式 `RefreshAll()` 一次把原因告诉用户。
 - 扫描范围（默认）= 已声明库根下 `*.md` / `*.mdx`；跳过隐藏目录（含 `.zoro/`、`.git/`）。
 - 范围扩展统一走库级配置（`include`/`exclude` glob、`recursive`、`follow_symlinks`），默认不扫描库外、不把非 Markdown 文件当作知识；主路径不扩展到“本地所有文件”。
 
@@ -203,7 +201,32 @@ type LibraryConfig struct {
 
 - 只做「该库怎么被消费」的偏好，不做内容语义（内容语义一律走 `@` 标签）。
 - 未知键保留、不报错。
-- ⚠️ **写回会丢东西**：`MarshalWorkspaceConfig` 走 `toml.Marshal`，**注释全丢**；`workspaceConfigOut` 只有 `default` / `data_dir` / `libraries` 三个顶层键，**顶层未知键不保留**（库级未知键经 `Extra` 保留）。程序化改 `zoro.toml` 前先看 `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` 的 D1。
+- ⚠️ **`MarshalWorkspaceConfig` 写回会丢东西**：它走 `toml.Marshal`，**注释全丢**；`workspaceConfigOut` 只有 `default` / `data_dir` / `libraries` 三个顶层键，**顶层未知键不保留**（库级未知键经 `Extra` 保留）。
+- ✅ **所以程序化改 `zoro.toml` 一律走 `core/configedit.go` 的外科式文本编辑**（`AddLibraryToWorkspace` / `SetDefaultLibrary`）：按行改、其余字节一个不动，改完 `ParseWorkspaceConfig` 前后各解析一次做自检（库数量不变、其它库的字段不变），任何意外就放弃写入。
+- ✅ **「添加一个知识库」只有一条链路：`core.AddLibrary(wsPath, name, rootArg, setDefault)`** —— 校验库名 → 查重 → root 相对路径按 `zoro.toml` 所在目录绝对化 → 首个库自动设 default → 建目录 → 外科式写回声明。CLI `zoro add` 与 Launcher `/lib add` 调的是同一个函数，两边语义不可能漂移。它**只改声明文件与建目录，不碰索引**，所以常驻进程必须自己重载工作区 + `Analyze(true)`（见「前端分工」）。
+
+## 写入层：`core/write.go`（块的增删改）
+
+读之外的另一半。**身份仍是三元组 `(库名, path, start)`**，没有引入块 ID —— 代价是 `start` 会随文件上方的改动漂移，所以有下面三条写定律（文件头有完整版）：
+
+- **L1 `start` 是易失的**：写之前一律按 `start` 重新定位 + 校验；写完 `start` 可能已变，**前端必须整体重新查询**，不能就地更新一条。
+- **L2 用户看到的 == 被改的**：`UpdateBlock` / `DeleteBlock` 都要求调用方交出 `expect`（它上一次 `LoadRaw` 拿到的原文）。函数会再读一次文件、`SliceBlock(text, start)` 与 `expect` 逐字比对，不一致就返回 `ErrBlockChanged`（「内容已变化，请重新搜索后再试」）——这就是乐观并发控制。改写范围还会与 `expect` 再做一次自检，对不上就拒写。
+- **L3 不换 inode**：追加是单次 `O_APPEND`，改写是就地 `Truncate`+`Write`，**不做 tmp+rename**（用户的 md 常常正在编辑器里开着）。写后读回逐字节校验，不符就回滚。
+
+```go
+func (l *Library) CaptureFile() string                                  // Extra["capture_file"]，默认 inbox.md
+func (l *Library) AppendBlock(d BlockDraft) (WriteResult, error)         // 追加到捕获文件末尾
+func (l *Library) UpdateBlock(path string, start int, expect string, patch BlockPatch) (WriteResult, error)
+func (l *Library) PreviewDelete(path string, start int) (string, error)  // 删之前先看要删掉什么
+func (l *Library) DeleteBlock(path string, start int, expect string) (WriteResult, error)
+```
+
+- **块边界只有一处定义**：`blockEnd(lines, from)` + `isHeadingLine(line)`（`core/scan.go`）。扫描器、`SliceBlock`（预览）、写入层共用，所以「预览里看到的」与「会被改写的」永远是同一段。
+- ⚠️ **`##` 标题行不在 `Block.Raw` 里**（它属于块的标题，不属于负载）。因此：`UpdateBlock` 保留块自己的 `##` 标题，`DeleteBlock` 连它一起删（否则留下孤儿标题）。
+- ⚠️ **负载中间夹着 `##` 标题行 = 硬拒绝**：那种行在 `expect` 里看不见，改它会静默删掉用户内容，所以直接报错让用户去编辑器里处理。
+- `BlockDraft` / `BlockPatch` 的 title / terms / body 都有校验：正文里不允许出现 `@` 指令行或 `##` 标题行（会造出扫描器认不出的形状）。
+- 路径经 `resolveContentPath` 解析，**拒绝逃出库根**（`../`、绝对路径、符号链接出去的都拦）。
+- 写完调 `afterWrite`：重新 `Analyze(false)` 让索引跟上；刷新失败不影响写入成功，错误经 `WriteResult.RefreshErr` 带回。
 
 ## 检索与匹配
 
@@ -242,6 +265,28 @@ type LibraryConfig struct {
 - **Web / Launcher 前端**：调用 `core.Query(q)`，自绘输入框/列表，用 `matches` 高亮；Wails Launcher 是常驻进程 + 全局热键 + 无边框浮窗，不用 fzf。
 
 fzf 三分离：匹配字段（`index`）≠ 显示字段（`title`）≠ 载荷（`(库,path)+start` 现场预览）。
+
+#### Launcher 桥接面（`ext/zoro-launcher/app.go`）
+
+| 分组 | 方法 | 说明 |
+|---|---|---|
+| 读 | `Query` / `LoadRaw` / `RenderHTML` / `ResolveSource` | 搜索 → 按三元组截原文 → 渲染 |
+| 写声明 | `ListLibraries` / `PickDirectory` / `AddLibrary` / `RevealLibrary` / `Reindex` | `/lib`、`/lib add`、`/reindex` 的后端 |
+| 动作 | `OpenSource` / `PopoutResult` / `Copy` / `Hide` | 系统级动作 |
+| 状态 | `Status` / `GetTheme` + `zoro:progress` 事件 | 状态栏与进度 |
+
+常驻进程比 CLI 多两条义务（`App.AddLibrary` 里，漏掉的症状写在注释里）：
+
+1. **改完声明必须重载工作区**：`a.ws` 是启动时的快照，不 `core.LoadWorkspace` 就「加了库但搜不到」。P-13 之后 store 从不跨调用持有，所以旧工作区没有需要 `Close()` 的东西。
+2. **对新库 `Analyze(true)`**：新目录可能已有几百个 md，也可能带着一份陈旧的 `.zoro/zoro.db`。失败要报「库已添加，索引失败，可 `/reindex` 重试」——声明已经写好了，不能让整个调用看起来失败。
+
+`ListLibraries` 的块数取自内存里的 `Blocks`，**不触发刷新**（为一次概览去抢 bbolt 独占锁不值得）；反过来说，`Library.Query` 是尽力刷新、拿不到锁就静默用旧块，所以**「索引没刷新」这件事只有 `Status()` 会告诉用户**（它显式 `RefreshAll()` 并把错误拼进返回串）。
+
+#### Launcher 输入框是命令面
+
+同一个输入框既是搜索框也是命令行，**模式由文本派生**（`get mode()`：首字符是 `/` 且首个 token 是已注册动词的前缀 → 命令；否则搜索。开头留一个空格是逃生舱，所以 `/root/zoro` 照样能搜）。已实现：`/lib`、`/lib add [name]`、`/reindex`、`/theme <name>`、`/help`。
+
+**所有视图共用一种候选行形状** `{ id, title, indexHtml, meta, action, payload? }`，模板只遍历 `items` getter、从不判断「现在是什么模式」；回车统一走 `runActive()` 按 `action` 分派。加一种视图 = 在 `app.js` 多一个来源 + 注册表里多一行，模板与键盘处理都不用改。规则清单在 `ext/zoro-launcher/frontend/README.md`（单一事实源，此处不复制）。
 
 ## 渲染管线与标签组件（多 target）
 

@@ -97,6 +97,45 @@
   - 引入两条 Tailwind 特有的静默失败路径（P-8 `@layer` purge、P-9 运行时 HTML 样式），CI 的 `Verify frontend assets` 步骤是唯一自动兜底。
 - **何时重新考虑**：UI 规模增长到需要组件复用/路由/双向数据流（例如 Launcher 长出设置面板、多标签页）时，评估 Svelte 或 Vue + Vite；Wails v3 升级（`todos.md` #9.6）时一并重估，因为多窗口会改变「一个窗口一个组件」的前提。
 
+## AD-15 块级写 API：身份仍是三元组 + `expect` 乐观并发 + 就地改写
+
+- **选择**：`core/write.go` 提供 `AppendBlock` / `UpdateBlock` / `DeleteBlock` / `PreviewDelete`，全部按 `(库名, path, start)` 定位，**不引入块 ID**。改与删要求调用方交出 `expect`（它上一次 `LoadRaw` 拿到的原文），写前重新定位 + 逐字比对，不一致返回 `ErrBlockChanged`；写后读回逐字节校验，不符就 `Truncate` 回滚。追加是单次 `O_APPEND`，改写是就地 `Truncate`+`Write`。块边界只有一处定义（`blockEnd` + `isHeadingLine`），扫描器 / 预览 / 写入层共用。
+- **否决**：
+  - **给块发稳定 ID（写进 Markdown 或存进 store）**：会污染内容契约（作者要看得见并维护它），或在文件被外部编辑后立刻失效。三元组虽然易失，但失效是**可检测**的（`expect` 比对），而 ID 失效往往是静默的。
+  - **文件锁 / 全局互斥**：跨进程锁不住编辑器；用户的 md 本来就该能同时被别的工具改。乐观并发 + 明确报错比悲观锁更符合「Markdown 是唯一源」。
+  - **tmp+rename 原子替换**：会换 inode。用户的文件常常正在编辑器里开着，编辑器随后保存就会把我们的改动整份覆盖掉（而且没有任何报错）。原子性在这里是**错误**的目标，我们要的是「不打扰别人打开的那个文件」。
+  - **让 `UpdateBlock` 一起改块的 `##` 标题**：标题行不在 `Block.Raw` 里（它是块的标题，不是负载），改它意味着改写范围与用户在预览里看到的范围不一致，违反 L2。删除则必须连标题一起删，否则留下孤儿 `##`。
+- **理由**：三条写定律（L1 `start` 易失、L2 看到的==被改的、L3 不换 inode）把「精准增删改查」这个核心优势变成可验证的不变式，而不是靠调用方小心。
+- **代价**：
+  - 前端不能就地更新一条候选：`start` 会漂移，写完必须整体重新查询（L1）。
+  - **负载中间夹着 `##` 标题行时硬拒绝**（那种行在 `expect` 里看不见，改它会静默删掉用户内容）→ 用户得去编辑器里手工处理。这是刻意的能力缺口。
+  - 并发写冲突时用户要重走一遍「搜索 → 预览 → 改」，没有自动合并。
+
+## AD-16 `zoro.toml` 外科式文本编辑 + 「添加一个库」只有一条链路（决策点 D1 已定）
+
+- **选择**：程序化改声明文件一律走 `core/configedit.go`（按行改、其余字节一个不动，改完前后各 `ParseWorkspaceConfig` 一次自检，任何意外就放弃写入）。「添加一个知识库」整条链路收进 `core.AddLibrary(wsPath, name, rootArg, setDefault)`，CLI `zoro add` 与 Launcher `/lib add` 调同一个函数。
+- **否决**：
+  - **`MarshalWorkspaceConfig` 读-改-写**：`toml.Marshal` 会**丢掉全部注释**和顶层未知键。用户手写的 `zoro.toml` 里注释是文档，丢了就是数据损坏。
+  - **TOML 库的 AST 级编辑**（`toml.Edit` 之类）：能保住结构但保不住格式细节（空行、缩进、行尾注释位置），且引入一个新的依赖面；逐行文本编辑 + 解析自检更直白，也更容易被后来者读懂。
+  - **CLI 与 Launcher 各写一份添加逻辑**：两边语义必然漂移（例如「首个库自动设 default」这种规则只有一边记得）。
+- **理由**：声明文件是用户手写、版本控制里的东西，**默认不动它**；只动必须动的那几行，并且动之前先证明自己能把它读回来。
+- **代价**：文本级编辑对畸形输入更敏感，所以每次改都要跑一遍「解析 → 改 → 再解析 → 比对不变量」的自检；`SetDefaultLibrary` 插入位置贴着第一个表头（空行留在它上面），纯粹不好看，评估后认为不值得为它增加规则。
+
+## AD-17 Launcher 命令面：模式由文本派生 + 所有视图共用一种行形状
+
+- **选择**：同一个输入框既是搜索框也是命令行。模式**不存状态**，由文本派生（`get mode()`：首字符是 `/` 且首个 token 是已注册动词的前缀 → 命令，否则搜索）。命令写在 `COMMANDS` 注册表里（`{args, desc, action, options?}`），加一条命令 = 注册表加一行 + 组件里写一个同名方法。所有视图（搜索命中 / 命令候选 / 知识库列表 / 待确认）产出**同一种行形状** `{id, title, indexHtml, meta, action, payload?}`，模板只遍历 `items` getter；回车统一走 `runActive()` 按 `action` 分派。不可逆动作（写 `zoro.toml`）两步走：先弹**原生目录选择框**，再把结果落成一行「待确认」让用户回车确认。
+- **否决**：
+  - **快捷键切换输入框模式**（另一个候选方案）：模式变成内存状态，就有「显示的是 A 模式、实际按 B 模式解释」的漂移空间；派生自文本则永远一致，而且用户能从输入框里读出当前模式。
+  - **`@` 当命令前缀**：`@` 已经是内容契约里的标签符号（`@index` / `@shell`），复用会让「搜 @shell 块」和「执行命令」冲突。
+  - **在 780px 输入框里手打目录路径**：含空格的路径、中文目录名、Tab 补全，原生 `NSOpenPanel` 全都已经解决好了（见 P-14）。
+  - **每种视图各写一块 DOM + 各自的显示/隐藏开关**：这正是重构前那套 `is-hidden`/`show-detail`/`show-results` 的翻版，状态多处写入，低水平维护者必错。
+  - **shell 式引号/转义规则**：命令面的参数是库名、主题名这类短 token，引号规则会让「难输入」的问题从路径转移到语法上；难输入的东西交给原生控件。
+- **理由**：延续 AD-12 的目标——让 bug 类别在结构上不可能发生。模式无状态可漂移；行形状唯一，模板不可能对某种视图漏掉一个分支；候选匹配失败时有兜底行，不会退化成「空面板 = 静默失败」（P-15）。
+- **代价**：
+  - 搜索以 `/` 开头的词需要在前面加一个空格（逃生舱），是个要记住的小规则。
+  - 命令面没有历史、没有多行编辑、没有真正的解析器（不支持引号），命令一复杂就得升级成别的交互。
+  - 一次回车只做一件事：`/lib add` 需要两次回车（选目录 → 确认），比「一步到位」多一次按键，换来的是不可逆写入永远经过一次明示确认。
+
 ## 补记：已实现但未记录的决策（流程漂移）
 
 > 这两项**代码已落地**，但当时没写 AD。此处只补记「选了什么、代价是什么」，
@@ -104,10 +143,11 @@
 
 ### AD-13（补记）元数据 store：bbolt 单文件
 
-- **现状**：库级元数据从 `.zoro/meta.json` 迁到 bbolt 单文件 `<库根>/.zoro/zoro.db`（或 `<data_dir>/<库名>/zoro.db`），schema 2，三个 bucket（`meta` / `blocks` / `fingerprints`）；`meta.json` 仅作遗留迁移源。纯 Go、无 cgo、事务自带一致性。
+- **现状**：库级元数据从 `.zoro/meta.json` 迁到 bbolt 单文件 `<库根>/.zoro/zoro.db`（或 `<data_dir>/<库名>/zoro.db`），三个 bucket（`meta` / `blocks` / `fingerprints`）；`meta.json` 仅作遗留迁移源。纯 Go、无 cgo、事务自带一致性。
+  ⚠️ 容器版本是 `StoreSchema = 1`（`core/store.go`）；`core/meta.go` 的 `Schema = 2` 是**遗留整文件 manifest** 的版本，两者不是一个东西（本文档与 `architecture.md` 都曾写混，2026-09-09 已订正）。
 - **未记录的权衡**：为什么不是 sqlite / 继续 json / badger —— 无据可查。
-- **已付代价**：bbolt 是**独占锁**且 `OpenStore` 传 `nil` options（`Timeout=0` → 无限重试永不报错），store 打开后常驻不释放 → 常驻型前端会锁死同库 CLI，见 `pitfalls.md` **P-13**。这个代价当初没被识别。
-- **何时重新考虑**：需要多进程并发读写（Launcher + CLI + `zoro serve` 同时在线）时，锁模型必须重新设计（`bolt.Options{Timeout}` / ReadOnly 共享锁 / 或换引擎）。
+- **已付代价（2026-09-09 已偿清）**：bbolt 是**独占锁**，而当初 `OpenStore` 传 `nil` options（`Timeout=0` → 无限重试永不报错）+ store 常驻不释放 → Launcher 锁死同库 CLI（P-13）。现在 `OpenStore` 传 `Timeout: 300ms` 并把 `bolt.ErrTimeout` 映射成 `ErrStoreLocked`，`Library` 也从不再跨调用持有 store（唯一入口 `withStore`）。
+- **何时重新考虑**：需要**多进程并发写**（Launcher + CLI + `zoro serve` 同时在线且都要写索引）时，锁模型必须重新设计（ReadOnly 共享锁 / 或换引擎）。当前的「快速失败 + 尽力刷新」只解决读侧共存。
 
 ### AD-14（补记）多面搜索：`Face` 接口 + 库级可配
 
@@ -117,7 +157,13 @@
 
 ## 待定项（backlog）
 
-- **Launcher 能力扩展的 6 个待拍板决策点 D1–D6**（`zoro.toml` 写入策略 / 删除语义 / 命令符号选型 / store 生命周期 / 脑图载荷格式 / `capture_file` 归属）：方案与推荐见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` §9，**定了之后各自补一条 AD**。
+- **Launcher 能力扩展的 6 个决策点**（原始清单见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` §9）进度：
+  - D1 `zoro.toml` 写入策略 → **已定**，AD-16。
+  - D2 删除语义 → **已定**，AD-15（删除连块自己的 `##` 标题一起删；删前 `PreviewDelete`）。
+  - D3 命令符号选型 → **已定**，AD-17（`/verb`；`@` 因为已是内容标签符号被否决）。
+  - D4 store 生命周期 → **已定**，AD-13「已付代价」+ P-13（fixed）。
+  - D6 `capture_file` 归属 → **已定**：库级配置（`LibraryConfig.Extra["capture_file"]`），默认 `inbox.md`，见 `Library.CaptureFile()`；前端还没有暴露它（捕获 UI 未实现）。
+  - D5 脑图载荷格式 → **仍待定**，属于扩展方案沉淀任务（看板 9.11）。
 - tag / facet：标签名即 facet；按 facet 过滤的 query（如 `-t video`）待做。
 - 同主题块聚合：`index` 与同主题 `shell`/`video` 并排命中是否聚合成「主题行」，留待 P3 交互设计。
 - 稳定条目 id：暂用 `(库名, path, start)`；跨编辑引用跳转需再引入内容锚点。
