@@ -169,7 +169,9 @@ func (l *Library) refresh(force bool) error {
 
 	// 快路径：内存指纹与磁盘一致 → 本次刷新**完全不打开 store**。
 	// 常驻 Launcher 的绝大多数 Query 都走这里，因此不会与 CLI 抢锁。
-	if !force && len(l.fps) > 0 {
+	// ⚠️ 判据是 `fps != nil` 而不是 `len(fps) > 0`：**空库的镜像也是有效镜像**。
+	// 用 len 判会把「已加载的空库」误当成「还没加载过」，从而走进下面的首次接触分支。
+	if !force && l.fps != nil {
 		dirty, removed := diffFingerprints(l.fps, now)
 		if len(dirty) == 0 && len(removed) == 0 {
 			return nil
@@ -185,20 +187,25 @@ func (l *Library) refresh(force bool) error {
 		}
 
 		prev := l.fps
-		if len(prev) == 0 {
+		if prev == nil {
+			// ReadFingerprints 对未初始化的 store 返回**空 map**，而空 map 与「磁盘上
+			// 确实一个 md 都没有」无法区分，所以只在非空时采纳。
 			stored, readErr := s.ReadFingerprints()
 			if readErr != nil {
 				return readErr
 			}
-			prev = stored
+			if len(stored) > 0 {
+				prev = stored
+			}
 		}
-		if len(prev) == 0 {
-			// 首次接触这个库：全量扫描。Blocks 已由在线模式（OpenLibrary*）
-			// 填好时不重复扫，只补写 store —— 与旧 ensureFresh 语义一致。
-			if l.Blocks == nil {
-				if err := l.Rescan(); err != nil {
-					return err
-				}
+		if prev == nil {
+			// 内存和 store 都没有指纹 = 真正的第一次接触：全量扫描。
+			// ⚠️ 这里不要加「Blocks 非 nil 就不重复扫」的捷径：Blocks 可能是**空库**
+			// 的扫描结果（非 nil 但为空），而磁盘上刚多了文件。那样会把 now 采纳成
+			// 镜像却从不索引新文件 —— 新增文件永久搜不到，直到它再次被修改。
+			// （这个 bug 由 write_test.go 的 capture 用例抓到。）
+			if err := l.Rescan(); err != nil {
+				return err
 			}
 			return l.writeAll(s, now)
 		}
