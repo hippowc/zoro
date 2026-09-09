@@ -51,7 +51,8 @@ open build/bin/zoro-launcher.app
 
 Workflow：`.github/workflows/build-macos-launcher.yml`
 
-- 触发：push tag 匹配 `launcher-*`，另可 `workflow_dispatch`。
+- 触发：push tag 匹配 `v*`（语义化版本号，如 `v1.0.0`、预发布 `v1.1.0-rc.1`），另可 `workflow_dispatch`。`launcher-*` 仍能触发，但只是兼容旧配方的别名，**不要再新用**。
+- ⚠️ tag 必须打在**含当前 workflow 文件的那个提交**上。Actions 用的是被 tag 指向的提交里的 workflow；若先打 tag 再改触发规则，会出现「tag 推上去了、什么都没发生」的静默失败。
 - runner：`macos-14`；Go `1.27.1`；Node `22`（npm 缓存指向 `ext/zoro-launcher/frontend/package-lock.json`）；Wails CLI `wails@v2.15.0`。
 - 步骤：checkout → setup-go → setup-node → install Wails CLI → `wails build -clean -platform darwin/arm64 -o zoro-launcher`（内部自动跑 `npm install` + `npm run build`）→ **Verify frontend assets** → codesign（ad-hoc）→ 打包 zip + sha256 → softprops 发布 Release。
 - `Verify frontend assets` 步骤只干一件事：确认 `dist/styles.css` 非空且含 `glass-panel`（`@layer components`）与 `wails-draggable`（`@layer utilities`）。它防的是最危险的静默失败——Tailwind 跑成功但 `content` 路径写错，产出近乎空的 CSS，应用无样式却照样构建、签名、发布（`facts/pitfalls.md` P-8）。**删这一步等于放弃唯一的自动兜底。**

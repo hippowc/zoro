@@ -3,7 +3,8 @@ name: build-macos-launcher
 on:
   push:
     tags:
-      - 'launcher-*'
+      - 'v*'          # 正式约定：语义化版本号，如 v1.0.0 / v1.1.0-rc.1
+      - 'launcher-*'  # 兼容旧配方（kb/skills/ship-launcher-release.md 早期版本），不要再新用
   workflow_dispatch:
 
 permissions:

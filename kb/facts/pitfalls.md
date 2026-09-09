@@ -43,7 +43,7 @@
 - **触发**：在 Linux/Windows 上执行 `wails build -platform darwin/arm64` 或 `./build-macos.sh`。
 - **症状**：CGO/Objective-C 编译失败或缺 Xcode 工具链。
 - **根因**：Wails v2 macOS 前端含 Objective-C/C 源码，依赖 macOS 本机 Xcode 工具链；GitHub Actions 用 `macos-14` runner 承担。
-- **修法**：macOS 本地构建用 `tools/launcher-build-release.md`；跨平台产物经 GitHub Actions `launcher-*` tag 触发。
+- **修法**：macOS 本地构建用 `tools/launcher-build-release.md`；跨平台产物经 GitHub Actions 版本号 tag（`v*`）触发。
 
 ## P-6 Launcher 前端 UI 与原生窗口背景不同步
 

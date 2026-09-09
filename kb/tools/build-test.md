@@ -44,7 +44,7 @@ node --check /root/zoro/ext/zoro-launcher/frontend/dist/app.js
 
 - 必须在 macOS + Xcode 工具链；Linux 无法交叉编译 macOS 版（见 `facts/pitfalls.md` P-5）。
 - 本地 Apple Silicon：`cd ext/zoro-launcher && ./build-macos.sh`。
-- CI：推送 `launcher-*` tag 触发 GitHub Actions，见 `tools/launcher-build-release.md`。
+- CI：推送版本号 tag（`v1.2.3`）触发 GitHub Actions，见 `tools/launcher-build-release.md`；tag 约定与回滚见 `tools/versioning-and-rollback.md`。
 
 ## 测试原则
 

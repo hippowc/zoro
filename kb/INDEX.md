@@ -14,6 +14,7 @@
 | 改 core（模型 / analyze / 查询 / 渲染 / 扩展接口） | `facts/architecture.md` → `facts/decisions.md` | `tools/build-test.md` |
 | 改 CLI 或 Web / 跑测试验证 | `tools/build-test.md` | `tools/verify.md`；`facts/pitfalls.md` |
 | 构建 / 发布 macOS Launcher | `tools/launcher-build-release.md` → `skills/ship-launcher-release.md` | `facts/pitfalls.md` |
+| 打版本号 / **回滚到稳定版本** / 「要不要开分支」 | `tools/versioning-and-rollback.md`（四档回滚，够用就停） | `facts/decisions.md` **AD-19**（为什么用 tag 不用分支） |
 | 改 Launcher 前端（Tailwind 样式 / Alpine 状态 / 窗口尺寸） | `../ext/zoro-launcher/frontend/README.md` → `tools/launcher-build-release.md`（前端构建节） | `facts/pitfalls.md` P-6…P-15；`facts/decisions.md` AD-12 |
 | 给 Launcher **加命令 / 加视图**（`/lib`、`/reindex`、`/theme` 这一类） | `../ext/zoro-launcher/frontend/README.md`（命令面节：两步配方）→ `tools/launcher-build-release.md`（命令面节：已实现清单与四条不变量） | `facts/decisions.md` AD-17；`facts/pitfalls.md` P-15 |
 | 给 Launcher 加**尚未落地**的能力（片段捕获 / 删除语义 / 视图注册表） | `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md`（已核验源码事实 F-1…F-18、禁令清单）⚠️ 其 §4.4 / §6.3 / §7 有 **7 处已被实现推翻**，对照表见 `journal/2026-09-09-visual-blocks-storage-vs-editing-surface.md` §9 | `../todos.md` 看板 9.9–9.11；`facts/decisions.md` AD-15…AD-18 |
@@ -31,7 +32,7 @@
 kb/
 ├── INDEX.md             # 本文件：索引入口
 ├── facts/               # 是什么：architecture / decisions / pitfalls / glossary
-├── tools/               # 怎么做（原子配方）：构建 / CLI / 发布 / 验收 / 网关
+├── tools/               # 怎么做（原子配方）：构建 / CLI / 发布 / 版本回滚 / 验收 / 网关
 ├── skills/              # 怎么做（端到端 SOP）
 └── journal/             # 时序事实（有观察时才创建文件，不预建空目录）
 ```

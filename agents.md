@@ -65,6 +65,7 @@ kb/
 - **身份三元组**：块身份 = `(库名, path, start)`；库名必须进展示路径 / 候选行 / URL。
 - **安全默认拒绝**：外部来源内容默认不执行、sanitize、显式确认。
 - **设计先于代码**：改 `kb/facts/architecture.md` 或 `kb/facts/decisions.md` 覆盖的点前，先改文档再动代码。
+- **主干直接开发，稳定版用附注 tag 锚定**：不开长期开发分支（`kb/` 的递增编号与生成物 `dist/styles.css` 合并必冲突）；已推送的 tag **永不改名 / 移动 / 删除**。版本号怎么选、出问题怎么退回，见 `kb/tools/versioning-and-rollback.md`（依据 `kb/facts/decisions.md` AD-19）。
 
 ### 4.2 风格与格式
 

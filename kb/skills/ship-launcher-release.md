@@ -29,11 +29,13 @@ cd /root/zoro
 git add ext/zoro-launcher            # 含 frontend/src、package*.json；node_modules 已被根 .gitignore 排除
 git commit -m "fix/feat(launcher): <一句话>"
 git push origin main
-TAG="launcher-<改动摘要>-$(date +%Y%m%d)"   # 例：launcher-tailwind-alpine-20260909
-git tag "$TAG" && git push origin "$TAG"
+TAG="v1.2.3"                         # 语义化版本号；预发布用 v1.2.3-rc.1
+git tag -a "$TAG" -m "<一句话说明这个版本>" && git push origin "$TAG"
 ```
 
-> tag 名匹配 `launcher-*` 才会触发 GitHub Actions 构建发布。命名沿用 `launcher-<摘要>-<YYYYMMDD>`（早期用过 `launcher-macos-vX.Y`，同样能触发）。
+> **版本号怎么选**：修 bug / 改文案 → patch（`v1.0.1`）；加命令、加视图、加标签类型 → minor（`v1.1.0`）；内容契约或 `zoro.toml` 格式不兼容 → major（`v2.0.0`）。
+> tag 名匹配 `v*` 才会触发 GitHub Actions 构建发布（`launcher-*` 是兼容旧配方的别名，不要再新用）。**必须用 `git tag -a`（附注 tag）**：它是「稳定版本」的唯一锚点，回滚全靠它，见 `tools/versioning-and-rollback.md`。
+> tag 要打在含当前 `.github/workflows/build-macos-launcher.yml` 的提交上，否则 Actions 用旧触发规则，会静默不构建。
 > `frontend/dist/` 是生成物但**必须提交**：`//go:embed all:frontend/dist` 在 CI 上直接嵌入，且 `wails build -clean` 从不清 dist。
 
 ## 等待 CI
@@ -48,7 +50,7 @@ curl -sL "https://api.github.com/repos/hippowc/zoro/actions/runs?per_page=5" \
 ## 取下载地址与 SHA256
 
 ```bash
-TAG=launcher-<摘要>-<YYYYMMDD>
+TAG=v1.2.3
 curl -sL "https://api.github.com/repos/hippowc/zoro/releases/tags/$TAG" \
   | jq -r '.assets[] | [.name, .browser_download_url] | @tsv'
 curl -sL "https://github.com/hippowc/zoro/releases/download/$TAG/zoro-launcher-macos-arm64.zip.sha256"

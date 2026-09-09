@@ -9,8 +9,9 @@
 - ✅ core 已迁移至 `core/`（Go package）：Block 统一标签模型 / Registry / bbolt 元数据 store（`StoreSchema = 1`；`meta.go` 的 `Schema = 2` 是遗留 `meta.json` 的版本号，两者无关）/ Workspace / 库级配置
 - ✅ CLI MVP 落地至 `cmd/zoro`：`add`（添加知识库并写回 zoro.toml）/ `search` / `preview` / `open`（打开源文件）/ `html` / `text` / `index`；`serve` 仍为 P2 占位
 - ✅ `ext/zoro-launcher` Wails 骨架：Query/Preview/Copy 桥接已就位
-- ✅ 桌面 Launcher macOS MVP 已就绪（待用户 Mac 实测）：Carbon 全局热键 Cmd+Shift+Z（无辅助功能/输入监控权限）+ 无边框置顶透明浮窗 + 查询/预览/复制/打开源文件
-- ✅ Launcher 前端重构为 **Tailwind CSS + Alpine.js**，窗口高度随内容自适应（Spotlight 式，待 Mac 实测）：见看板 9.55 与 `kb/facts/decisions.md` AD-12
+- ✅ 桌面 Launcher macOS MVP 已就绪（**2026-09-09 用户 Mac 实测通过**）：Carbon 全局热键 Cmd+Shift+Z（无辅助功能/输入监控权限）+ 无边框置顶透明浮窗 + 查询/预览/复制/打开源文件
+- ✅ Launcher 前端重构为 **Tailwind CSS + Alpine.js**，窗口高度随内容自适应（Spotlight 式，**Mac 实测通过**）：见看板 9.55 与 `kb/facts/decisions.md` AD-12
+- ✅ **`v1.0.0` = 当前稳定基线**（用户 2026-09-09 验收：「超出了我的预期」）。版本号约定（`vMAJOR.MINOR.PATCH` 附注 tag，同时是 CI 触发器与 Release 名）与**四档回滚配方**见 `kb/tools/versioning-and-rollback.md`；主干直接开发、不开长期分支的依据见 AD-19
 - ✅ **P0 store 独占锁已修**（原 🔴）：`bolt.Open` 加 300ms 超时 → `ErrStoreLocked`；`Library` 改为 `withStore(fn)`「用完即关」，从不跨调用持锁；刷新失败由 Launcher `Status()` 显式带出。见看板 5.5、`kb/facts/pitfalls.md` P-13
 - ✅ **写入层落地**（「精准的增删改查」的地基）：`core/write.go` 块级增/改/删（三元组身份 + `expect` 乐观并发 + 就地写，三条写定律 L1–L3）、`core/configedit.go` 外科式改 `zoro.toml`（**注释与未知键活下来**）、`core.AddLibrary` 作为 CLI `zoro add` 与 Launcher `/lib add` 的**同一条链**。见 `kb/facts/architecture.md` 写入层、AD-15 / AD-16
 - 🔄 Launcher **能力扩展方案部分落地**：输入框 `/verb` 命令面已实现 `/lib`、`/lib add`（原生目录框 + 确认行）、`/reindex`、`/theme`、`/help`；**未做**：`/lib rm`、`/lib default`、`/new`（片段捕获 UI，core 侧 `AppendBlock` 已就绪但前端无入口）、视图注册表、脑图视图。见看板 9.8–9.11、AD-17
@@ -69,14 +70,15 @@
 - **同主题块聚合**：`index` 块与同主题 `shell`/`video` 块命中并排显示的问题，留待 P3 交互前端设计。
 - **稳定条目 id**：当前用 `(library, path, start)` 定位；跨编辑引用跳转需再引入内容锚点。
 - **`@card` 等块组件**：语法已设计、渲染注册表未实现；等 Web/桌面 target 需要时再做。
-- **Launcher `DisableResize: true`**：窗口高度现在由内容驱动，用户手动拉伸会与 `fitWindowToContent()` 打架；是否禁掉手动缩放待 Mac 实测后再定。
+- **Launcher `DisableResize: true`**：窗口高度现在由内容驱动，用户手动拉伸理论上会与 `fitWindowToContent()` 打架；v1.0.0 实测未出现该反馈，**先不加**，真抖动了再开。
 - **Launcher `popoutActive()` 未绑定**：Go 侧 `PopoutResult` 与前端方法都保留（`app.js` 有注释），等 Wails v3 多窗口或用户明确需求再决定绑到哪个键。
 
 ## 下一步建议顺序
 
-1. **先收 Mac 实测**：9.55 前端重构 + 9.8 命令面都是「代码就绪、Linux 侧无法验证 GUI」的状态。实测清单见 `kb/tools/launcher-build-release.md`；踩到新坑就补 `kb/facts/pitfalls.md`。
-2. **9.9 片段捕获 UI**（性价比最高）：core 写 API 已就绪，剩下纯前端——`/new` 命令 + 一个复用详情模式外壳的 textarea 面板。做完 Launcher 才真正从「只读搜索器」变成「能往里写东西的知识库入口」。
-3. **9.10 视图注册表**：把「`kind` → 怎么展示 / 有哪些动作」从 if-else 里抽出来，是 9.11 的前置；顺带把删除/编辑动作接到已就绪的 `DeleteBlock` / `UpdateBlock` 上。
-4. **9.11 脑图视图**：依赖 9.10 的注册表；载荷格式（D5）是唯一还没拍板的决策点。
-5. **并行轨**：P2 `zoro serve`（#6）与 P3 fzf（#7）互不依赖，可在上面任一步之间插入；`@shell` 执行（#8）放 P3 后半段，安全确认一起做。
-6. **被上游阻塞**：9.6 Wails v3 多窗口等稳定版；9.7 三平台 + 回填等 Spike 结论。
+1. **9.9 片段捕获 UI**（性价比最高）：core 写 API 已就绪，剩下纯前端——`/new` 命令 + 一个复用详情模式外壳的 textarea 面板。做完 Launcher 才真正从「只读搜索器」变成「能往里写东西的知识库入口」。
+2. **9.10 视图注册表**：把「`kind` → 怎么展示 / 有哪些动作」从 if-else 里抽出来，是 9.11 的前置；顺带把删除/编辑动作接到已就绪的 `DeleteBlock` / `UpdateBlock` 上。
+3. **9.11 脑图视图**：依赖 9.10 的注册表；载荷格式（D5）**已拍板**（AD-18：Markdown 嵌套列表 + markmap，阶段 A 恒等 codec），照 `kb/journal/2026-09-09-visual-blocks-storage-vs-editing-surface.md` §8 的五步做。
+4. **并行轨**：P2 `zoro serve`（#6）与 P3 fzf（#7）互不依赖，可在上面任一步之间插入；`@shell` 执行（#8）放 P3 后半段，安全确认一起做。
+5. **被上游阻塞**：9.6 Wails v3 多窗口等稳定版；9.7 三平台 + 回填等 Spike 结论。
+
+> 每次交付仍走 `kb/skills/ship-launcher-release.md`（版本号 tag → CI → 通知用户下载）。Mac 实测清单见 `kb/tools/launcher-build-release.md`；**踩到新坑先补 `kb/facts/pitfalls.md` 再改代码**。
