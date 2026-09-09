@@ -27,22 +27,70 @@ func ScanText(text, path string) []Block {
 }
 
 // SliceBlock cuts a block's raw text starting at the 1-based `start` line.
-// Boundary = start line -> next `@<name>` tag line / EOF (derived on the fly).
+// Boundary = start line -> next `@<name>` tag line / EOF (see blockEnd).
+//
+// ⚠️ 标题行被跳过，与扫描器**逐字节一致**（consume 第 1 条不把标题行放进 Raw）：
+// 一个块末尾的 `## 标题` 是**下一个**块的标题，不属于本块。少了这一条，
+// LoadRaw 看到的范围就比 Block.Raw 大，改/删会顺手吃掉下一个块的标题。
 func SliceBlock(text string, start int) string {
-	out := make([]string, 0, 8)
-	for no, line := range splitLines(text) {
-		n := no + 1
-		if n < start {
+	lines := splitLines(text)
+	from := start - 1
+	if from < 0 || from >= len(lines) {
+		return ""
+	}
+	out := make([]string, 0, blockEnd(lines, from)-from)
+	for _, line := range lines[from:blockEnd(lines, from)] {
+		if isHeadingLine(line) {
 			continue
-		}
-		if n > start {
-			if _, _, ok := parseDirective(line); ok {
-				break
-			}
 		}
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+// isHeadingLine 报告一行是否是扫描器眼里的**块标题行**：`## ` 开头，或整行只有 `##`。
+// 标题归属只有这一处定义（scanner.consume 第 1 条、SliceBlock、write.go 的范围计算共用）。
+// ⚠️ 缩进的 "  ## x" 不是标题（扫描器要求 ## 在第 0 列），它是正文。
+func isHeadingLine(line string) bool {
+	return strings.HasPrefix(line, "## ") || strings.TrimSpace(line) == "##"
+}
+
+// blockEnd returns the exclusive end of the block whose tag line is `lines[from]`.
+//
+// ⚠️ 这是块边界的**唯一定义处**，与 scanner.consume 逐条对齐；SliceBlock（预览 / Raw）
+// 和 write.go 的改 / 删都走它。改这里等于同时改「用户看到什么」和「会删掉什么」，
+// 两者必须始终一致（write.go 的 L2）。
+//
+//	扫描器第 0 条 → 代码围栏内部的 `@` 行是代码，不是边界；
+//	扫描器第 2 条 → 第 0 列的 `@<name>` 行结束本块（缩进的 @ 行不算，parseDirective 要求第 0 列）；
+//	扫描器第 3 条 → 只有紧跟 `@shell` 的**第一个**围栏受保护，围栏闭合后 pendingShell 清零。
+//
+// 少了围栏这一条，一个含 `@echo off` 的 bat 代码块会被从中间劈开 ——
+// 预览只显示半截，删除会留下一个不闭合的围栏，文件直接坏掉。
+func blockEnd(lines []string, from int) int {
+	pendingShell := false
+	if name, _, ok := parseDirective(lines[from]); ok {
+		pendingShell = ClassifyTag(name).IsShell()
+	}
+	var fence rune
+	for i := from + 1; i < len(lines); i++ {
+		line := lines[i]
+		if fence != 0 {
+			if isFenceClose(line, fence) {
+				fence, pendingShell = 0, false
+			}
+			continue
+		}
+		if _, _, ok := parseDirective(line); ok {
+			return i
+		}
+		if pendingShell {
+			if k := fenceKindOf(line); k != 0 {
+				fence = k
+			}
+		}
+	}
+	return len(lines)
 }
 
 type scanner struct {
@@ -96,13 +144,14 @@ func (s *scanner) consume(text string) {
 		}
 
 		// 1) Heading: record the latest heading only; it is never a boundary.
-		if rest, ok := strings.CutPrefix(line, "## "); ok {
-			s.lastHeading = strings.TrimSpace(rest)
-			s.headingFresh = true
-			continue
-		}
-		if strings.TrimSpace(line) == "##" {
-			s.lastHeading = ""
+		//    ⚠️ 标题行**不进 cur.lines**（所以也不在 Block.Raw 里），它属于下一个块的标题。
+		//    判据只有 isHeadingLine 一处定义，SliceBlock / write.go 与这里必须一致。
+		if isHeadingLine(line) {
+			if rest, ok := strings.CutPrefix(line, "## "); ok {
+				s.lastHeading = strings.TrimSpace(rest)
+			} else {
+				s.lastHeading = ""
+			}
 			s.headingFresh = true
 			continue
 		}

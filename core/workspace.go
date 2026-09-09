@@ -93,12 +93,23 @@ func (w *Workspace) Query(q string) []Candidate {
 	return out
 }
 
-// LoadRaw locates a library by name and cuts a block's raw text by (Path, Start).
-func (w *Workspace) LoadRaw(library, path string, start int) (string, error) {
+// Library looks a library up by name.
+//
+// 「按名字找库」只有这一处定义：LoadRaw 与 write.go 的三个写 API 都走它。
+func (w *Workspace) Library(name string) (*Library, bool) {
 	for _, lib := range w.Libraries {
-		if lib.Name == library {
-			return lib.LoadRaw(&Block{Library: library, Path: path, Start: start})
+		if lib.Name == name {
+			return lib, true
 		}
 	}
-	return "", fmt.Errorf("library not found: %s", library)
+	return nil, false
+}
+
+// LoadRaw locates a library by name and cuts a block's raw text by (Path, Start).
+func (w *Workspace) LoadRaw(library, path string, start int) (string, error) {
+	lib, ok := w.Library(library)
+	if !ok {
+		return "", fmt.Errorf("library not found: %s", library)
+	}
+	return lib.LoadRaw(&Block{Library: library, Path: path, Start: start})
 }
