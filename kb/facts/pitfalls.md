@@ -100,3 +100,22 @@
 - **症状**：所有 padding / gap / width 一起变小（`p-3.5` 从 14px 变 13.125px），布局看着哪儿哪儿都不对，但没有任何报错。
 - **根因**：Tailwind 的整套间距刻度基于 `rem`，改根字号等于全局缩放。
 - **修法**：根字号保持浏览器默认 16px；默认字号用 shell 上的 `text-[15px]` 表达（只影响文字，不影响间距刻度）。
+
+## P-13 Launcher 常驻持有 bbolt 独占锁 → CLI 卡死 / 重载工作区自锁死
+
+- **状态**：active（2026-09-09 设计调研中发现，尚未修）
+- **触发**：① Launcher 运行时（常驻进程，`HideWindowOnClose`）在终端跑 `zoro search / preview / index` 操作**同一个库**；② 启动第二个 Launcher 实例；③ 将来「添加库后重载 workspace」时没有先 `Close()` 旧的。
+- **症状**：① CLI **永久卡死**——无输出、无报错、只能 Ctrl-C；② 第二个实例同样卡死；③ Launcher 挂死自己（同进程不同 fd 也互斥）。全程没有任何错误信息，看起来像「程序坏了」。
+- **根因**：`core.OpenStore` 调 `bolt.Open(path, 0o600, nil)`（`core/store.go:28-42`），`nil` 选项 → `Options.Timeout = 0`；bbolt 的 `flock`（`bolt_unix.go:17-45`）在 timeout 为 0 时是**无限重试循环**（每 50ms 一次，永不返回错误）。而 `Library.Query → ensureFresh()` 首次就会 `OpenStore`（`core/library.go:316-341`），store 之后**常驻不释放**（只有显式 `Library.Close()` / `Workspace.Close()` 才关）。RW 模式取的是 `LOCK_EX` 独占锁。
+- **修法**（最小两步，完整推导见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` §3）：
+  1. `bolt.Open` 传 `&bolt.Options{Timeout: 300 * time.Millisecond}`，让争用**快速失败**并给出「另一个 zoro 进程正持有该库索引」的明确错误；
+  2. Launcher 不长期持有 store：`Hide()` 时 `ws.Close()`、唤起时重开（或每次 bridge 调用内 Open→用→Close）。
+  ⚠️ 配套必做：`ensureFresh()` 现在**吞掉所有错误**（`library.go:317-320` 空 if 体），加了超时后症状会从「卡死」变成「静默返回旧索引 = 搜不到刚写的内容」，更难查。必须让该错误可观测（如 `Library.LastRefreshErr` + `Status()` 带出）。
+
+## P-14 想在 macOS 上「拖文件夹进搜索框添加库」——Wails v2 做不到
+
+- **状态**：active（框架限制，非本项目 bug）
+- **触发**：在 Launcher 里实现文件/目录拖拽（`OnFileDrop`），期望 macOS 上可用。
+- **症状**：`options.Options` 里找不到 `EnableDragAndDrop`；即使注册了 `runtime.OnFileDrop`，拖拽进来也**毫无反应**。
+- **根因**：v2.15.0 的 drop 分支依赖 `window.chrome?.webview?.postMessageWithAdditionalObjects`（`internal/frontend/runtime/runtime_prod_desktop.js` 的 `CanResolveFilePaths`），那是 **Windows WebView2 专有 API**，WKWebView 上恒为 false；且 `pkg/options` 只有 `DisableResize`，没有开关可打开。
+- **修法**：改用原生目录选择框 `runtime.OpenDirectoryDialog(ctx, OpenDialogOptions{...})`（`pkg/runtime/dialog.go:33`，**返回 `""` 表示取消，不是 error**）。⚠️ darwin 上它以 **sheet 形式挂在主窗口下**（`WailsContext.m:658`），对无边框 76px 浮窗的观感需 Mac 实测；兜底是让用户 ⌘V 粘贴路径。原生多窗口/更好的 drop 等 Wails v3（`../../todos.md` 9.6）。

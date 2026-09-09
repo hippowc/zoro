@@ -97,8 +97,27 @@
   - 引入两条 Tailwind 特有的静默失败路径（P-8 `@layer` purge、P-9 运行时 HTML 样式），CI 的 `Verify frontend assets` 步骤是唯一自动兜底。
 - **何时重新考虑**：UI 规模增长到需要组件复用/路由/双向数据流（例如 Launcher 长出设置面板、多标签页）时，评估 Svelte 或 Vue + Vite；Wails v3 升级（`todos.md` #9.6）时一并重估，因为多窗口会改变「一个窗口一个组件」的前提。
 
+## 补记：已实现但未记录的决策（流程漂移）
+
+> 这两项**代码已落地**，但当时没写 AD。此处只补记「选了什么、代价是什么」，
+> **不补编理由**——原始权衡没有被记录，事后编造比缺失更有害。若将来要推翻其中任一项，先补一次真实评估。
+
+### AD-13（补记）元数据 store：bbolt 单文件
+
+- **现状**：库级元数据从 `.zoro/meta.json` 迁到 bbolt 单文件 `<库根>/.zoro/zoro.db`（或 `<data_dir>/<库名>/zoro.db`），schema 2，三个 bucket（`meta` / `blocks` / `fingerprints`）；`meta.json` 仅作遗留迁移源。纯 Go、无 cgo、事务自带一致性。
+- **未记录的权衡**：为什么不是 sqlite / 继续 json / badger —— 无据可查。
+- **已付代价**：bbolt 是**独占锁**且 `OpenStore` 传 `nil` options（`Timeout=0` → 无限重试永不报错），store 打开后常驻不释放 → 常驻型前端会锁死同库 CLI，见 `pitfalls.md` **P-13**。这个代价当初没被识别。
+- **何时重新考虑**：需要多进程并发读写（Launcher + CLI + `zoro serve` 同时在线）时，锁模型必须重新设计（`bolt.Options{Timeout}` / ReadOnly 共享锁 / 或换引擎）。
+
+### AD-14（补记）多面搜索：`Face` 接口 + 库级可配
+
+- **现状**：AD-6 的「三面」已扩成 `Face` 接口（`Name/Weight/Text/Matcher`）+ `faceRegistry`，实现 index(10.0) / title(5.0) / path(3.0) / raw(1.0，**桩，恒不命中**)；库级 `faces` / `face_weights` 可选面与调权，未知面名静默跳过。
+- **超出 AD-6 的部分**：AD-6 只说三面且「先 index，再 title，最后 raw」，未预见 `path` 面，也未预见面集可被库级配置改写。
+- **已付代价**：`raw` 面注册了但不工作 —— 配置里写 `faces = ["raw"]` 不报错也不生效，是个静默陷阱（已写进 `architecture.md`）。
+
 ## 待定项（backlog）
 
+- **Launcher 能力扩展的 6 个待拍板决策点 D1–D6**（`zoro.toml` 写入策略 / 删除语义 / 命令符号选型 / store 生命周期 / 脑图载荷格式 / `capture_file` 归属）：方案与推荐见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` §9，**定了之后各自补一条 AD**。
 - tag / facet：标签名即 facet；按 facet 过滤的 query（如 `-t video`）待做。
 - 同主题块聚合：`index` 与同主题 `shell`/`video` 并排命中是否聚合成「主题行」，留待 P3 交互设计。
 - 稳定条目 id：暂用 `(库名, path, start)`；跨编辑引用跳转需再引入内容锚点。

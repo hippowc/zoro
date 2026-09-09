@@ -19,11 +19,14 @@
 core（Go package，无 UI / 无 fzf / 无网络）
  ├─ 内容模型：Block / TagKind / Registry / Library / LibraryConfig / Workspace
  ├─ 工作区：Workspace ← zoro.toml 声明（库列表 + 库级配置）
- ├─ 分析（analyze）：扫描 @标签、分块 → 库级元数据（manifest）
- ├─ 元数据：库级 manifest（v2：块视图 + shell 能力）+ mtime 脏检查
+ ├─ 分析（analyze）：扫描 @标签、分块 → 库级元数据（bbolt store）
+ ├─ 元数据：库级 store（schema 2：块视图 + shell 能力 + 文件级指纹）
  ├─ 查询：Matcher interface（默认纯 Go 子序列模糊匹配，语义对齐 fzf；返回分数 + 命中区间）
- ├─ 渲染：Markdown → HTML（多 target 中的第一落点）
- └─ 扩展点：Render / Action / SyncProvider / Cipher（Go interface）
+ │        + Face interface（多面检索：index / title / path 已实现，raw 为占位）
+ ├─ 渲染：Markdown → HTML / ANSI / 纯文本（target 由 switch 分派，尚无注册表）
+ └─ 扩展点：**代码中真实存在的只有 `Matcher` 与 `Face`**；
+            `Render` / `Action` / `SyncProvider` / `Cipher` / `Extractor` /
+            `Collector` / `IndexBackend` 目前**只在文档占名，未定义接口**
 ```
 
 - `core` 不依赖任何 UI；fzf（仅 CLI）、Web、Launcher、SSG 都是消费 `core` 的前端；Launcher 用 Wails + 自绘列表，不引入 fzf。
@@ -93,17 +96,20 @@ git reset --hard <commit>
 
 先回答：**属于哪个语义域（定位/能力/呈现/偏好），负载怎么取（正文/fence/其他结构）**；两者说不清就不加。登记入口 = `core/registry.go`。
 
-## analyze 与库级元数据（manifest）
+## analyze 与库级元数据（store）
 
 ### 定位
 
-- `analyze` 把每个库的内容「编译」为库级 manifest；查询/预览/执行以元数据为入口。
-- **manifest 是派生物**：可删、可重建、幂等；真相永远在 Markdown + `@` 标签里。`.zoro/` 默认 gitignore。
+- `analyze` 把每个库的内容「编译」为库级元数据；查询/预览/执行以元数据为入口。
+- **元数据是派生物**：可删、可重建、幂等；真相永远在 Markdown + `@` 标签里。`.zoro/` 默认 gitignore。
 - 需要正文时按 `(库名, path, start)` 现场截取；元数据**不存 end、不存正文副本、不存配置**。
 
-### manifest 结构（schema v2）
+### 存储结构（schema 2，bbolt）
 
-路径：`<库根>/.zoro/meta.json`，**一个库一份**；workspace 组织关系由 `zoro.toml` 承载。
+路径：`<库根>/.zoro/zoro.db`，**一个库一份**（配置了 `data_dir` 时为 `<data_dir>/<库名>/zoro.db`）；workspace 组织关系由 `zoro.toml` 承载。
+
+- 容器是 **bbolt**（`core/store.go`），三个 bucket：`meta`（库名/root/schema/生成时间）、`blocks`（块记录）、`fingerprints`（文件指纹）。
+- bucket 里的值仍是 JSON 编码的记录，**块记录形状**如下（`core/meta.go` 的 `ManifestBlock`）：
 
 ```json
 {
@@ -121,7 +127,8 @@ git reset --hard <commit>
 ```
 
 - `library.name` 与 `zoro.toml` 声明一致（加载校验）；`root` 仅作记录。
-- `shell` 只记录 fence 语言 + 行号，不存命令正文。
+- `shell` 只记录 fence 语言 + 行号，不存命令正文；`Block.Raw` 是运行时字段，**不持久化**。
+- 旧路径 `.zoro/meta.json` 只作为**遗留迁移源**：存在则自动迁入 bbolt 并删除（`MigrateFromMetaJSON`）。
 
 ### 声明 vs 决策（关键边界）
 
@@ -129,17 +136,21 @@ git reset --hard <commit>
 
 | 来源 | 进哪里 | 示例 |
 |------|--------|------|
-| 文档内 `@` 标签 | manifest.blocks[].kind + shell | 有 bash 块可执行 |
-| 用户/机器偏好 | `zoro.toml` 库级配置 | preview=html、allow_exec=false |
+| 文档内 `@` 标签 | store 的 blocks bucket：kind + shell | 有 bash 块可执行 |
+| 用户/机器偏好 | `zoro.toml` 库级配置 | preview=html、allow_exec=false、faces=[…] |
 
-- 库级配置永不进 meta.json（删了 meta 重建不丢配置）；策略交给 `Render`/`Action` 注册表。
+- 库级配置永不进 store（删了 `.zoro/` 重建不丢配置）。
+- ⚠️ 策略分派所依赖的 `Render` / `Action` **注册表目前并不存在**：渲染 target 是一个 `switch`（`core/render.go`），`Action` 接口尚未定义。相关设计见 `../journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md`。
 
 ### 分块算法与生成失效
 
-- 逐行扫描；任意 `@<name>` 行开新块并查注册表分类；`@shell` 进入 fence 收集态；`##` 记最近标题；其余归当前块正文。
-- 主产物 `<库根>/.zoro/meta.json`；同写可读视图 `<库根>/zoro-index.tsv`（四列：title / index / start / path）。
-- 查询前 mtime 脏检查（任一 `*.md` 晚于 meta 即 stale，后续升级文件级 fingerprint）；原子写（tmp + rename）。
-- manifest 损坏 / schema 不匹配 → 自动重建（派生数据可丢）。
+- 逐行扫描；任意**行首** `@<name>` 行开新块并查注册表分类；`@shell` 进入 fence 收集态；`##` 记最近标题；其余归当前块正文。
+- 主产物 `<库根>/.zoro/zoro.db`。可读视图 `<库根>/zoro-index.tsv`（四列：title / index / start / path）**当前实际不会被写出**：`writeIndexView` 零调用者，而 CLI usage 文本仍在承诺它 —— 已知漂移，接上或删承诺二选一。
+- **脏检查已是文件级指纹**：`(path, mtime 纳秒, size)`（`FileFingerprint`）比对出 dirty / removed 集合，**只重扫脏文件**并保留其余块（`rebuildIncrementalStore`）；两者皆空则直接从 store 读块，不扫盘。`Analyze(force=true)` 才全量重扫。
+- ⚠️ 指纹只看 mtime+size，**无内容哈希、无 watcher** → 同 size 同 mtime 的改动不可见；写入内容后应显式 `Analyze(false)`，不要依赖隐式刷新。
+- store 损坏 / schema 不匹配 → 自动重建（派生数据可丢）。
+- **写入原子性现状**：bbolt 事务自身保证 store 一致；但 `WriteWorkspaceConfig` 是**非原子**的 `os.WriteFile`（`core/config.go`），而 core 里已有的 `atomicWrite`（tmp+rename）只有一个死代码调用者。
+- ⚠️ **存储生命周期与锁**：`OpenStore` 用 `bolt.Open(path, 0600, nil)`，`Timeout=0` 意味着抢不到 flock 时**无限重试、永不报错**；store 一经打开常驻不释放。常驻型前端（Launcher）因此会独占锁死同库的 CLI。详见 `facts/pitfalls.md` **P-13**（active）。
 - 扫描范围（默认）= 已声明库根下 `*.md` / `*.mdx`；跳过隐藏目录（含 `.zoro/`、`.git/`）。
 - 范围扩展统一走库级配置（`include`/`exclude` glob、`recursive`、`follow_symlinks`），默认不扫描库外、不把非 Markdown 文件当作知识；主路径不扩展到“本地所有文件”。
 
@@ -149,6 +160,8 @@ git reset --hard <commit>
 
 ```toml
 default = "sanji"            # 可选：无参进入的默认库
+# data_dir = "/data/zoro"    # 可选：派生文件（store）统一落到 <data_dir>/<库名>/；
+                             # 省略则用库内 <库根>/.zoro/（相对路径按本文件目录解析）
 
 [[libraries]]
 name = "sanji"
@@ -157,6 +170,10 @@ root = "/data/kb/sanji"
 [libraries.config]
 preview = "html"            # 候选：默认预览 target
 # allow_exec = false        # 候选：是否允许执行 @shell
+# faces = ["index", "title", "path"]     # 可选：启用哪些搜索面；省略 = DefaultFaces()
+# [libraries.config.face_weights]        # 可选：按面调权；省略 = 各面默认权重
+# index = 10.0
+# title = 5.0
 
 [[libraries]]
 name = "robin"
@@ -176,29 +193,36 @@ root = "robin"              # 支持相对路径，相对 zoro.toml 所在目录
 
 ```go
 type LibraryConfig struct {
-    Preview   string
-    AllowExec *bool
-    Extra     map[string]any   // 未知键保留，前向兼容
+    Preview     string              // 默认预览 target
+    AllowExec   *bool               // 是否允许执行 @shell（指针：区分「未设置」与 false）
+    Faces       []string            // 启用哪些搜索面；空 = DefaultFaces()
+    FaceWeights map[string]float64  // 按面调权；空 = 各面默认权重
+    Extra       map[string]any      // 未知键保留，前向兼容
 }
 ```
 
 - 只做「该库怎么被消费」的偏好，不做内容语义（内容语义一律走 `@` 标签）。
 - 未知键保留、不报错。
+- ⚠️ **写回会丢东西**：`MarshalWorkspaceConfig` 走 `toml.Marshal`，**注释全丢**；`workspaceConfigOut` 只有 `default` / `data_dir` / `libraries` 三个顶层键，**顶层未知键不保留**（库级未知键经 `Extra` 保留）。程序化改 `zoro.toml` 前先看 `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md` 的 D1。
 
 ## 检索与匹配
 
 **core**：`Matcher` interface（默认纯 Go 子序列模糊匹配，语义对齐 fzf）+ `Candidate{ library, title, index, path, start, score, matches }`；`matches` 为命中区间，供各前端高亮。
 
-### 三面搜索（搜什么）
+### 多面搜索（搜什么）
 
-| 面 | 内容 | 权重 / 定位 | 状态 |
-|----|------|-------------|------|
-| 标题 title | 标签向上最近的 `##` | 低权重辅助面（记忆 / 召回） | 后续接入 |
-| index terms | `@` 标签行的搜索词 | 高权重主搜索面（作者显式声明“何时被找到”） | P0/P1 落地 |
-| 正文 raw | 块负载原文 | P4 全文检索兜底面 | 全文引擎 bleve/zinc 再定 |
+`core/face.go`：`Face` interface = `Name() / Weight() / Text(*Block) / Matcher()`，一个面就是「在块的哪段文本上、用什么匹配器、算多少分」。分数按面累加。
 
-- 三层分工：`index` = 精确 / 意图面，`title` = 记忆 / 召回面，`raw` = 兜底面；演进顺序固定：先 index，再 title，最后 raw（P4）。
-- **P0/P1 只实现 index terms 主面**；title / raw 作为显式扩展点写入本文，避免后续误补错面。
+| 面 | 取文本 | 默认权重 | 状态 |
+|----|--------|---------|------|
+| index | `@` 标签行的搜索词（`Block.IndexText()`） | 10.0 | ✅ 已实现，主搜索面（作者显式声明“何时被找到”） |
+| title | 标签向上最近的 `##` | 5.0 | ✅ 已实现，记忆 / 召回面 |
+| path | 相对库根的文件路径 | 3.0 | ✅ 已实现，定位面 |
+| raw | 块负载原文 | 1.0 | ⚠️ 已注册但是**桩**：`rawMatcher.Match` 恒返回不命中，等 P4 全文引擎（bleve/zinc）接入前不得启用 |
+
+- 默认启用集 = `DefaultFaces()` = `["index","title","path"]`；库级 `faces` / `face_weights` 可覆盖（未知面名**静默跳过**，前向兼容）。
+- ⚠️ 把 `"raw"` 写进 `faces` 不会报错也不会生效 —— 桩实现是刻意的，避免在全文引擎落地前用线性扫描冒充全文检索。
+- 演进顺序仍固定：index → title/path → raw（P4）。
 
 ### 主搜索面语义（index terms）
 
@@ -299,7 +323,8 @@ zoro/                         # 本仓库（框架）
 |------|------|
 | Markdown 解析 | goldmark + GFM |
 | 语法高亮 | chroma（经 goldmark-highlighting） |
-| 元数据序列化 | encoding/json（schema 版本化） |
+| 库级元数据 store | **bbolt**（单文件 `.zoro/zoro.db`，schema 2）⚠️ 独占锁见 P-13 |
+| 遗留元数据迁移 | encoding/json（只用于读旧 `.zoro/meta.json` 迁入 bbolt） |
 | 工作区配置 | pelletier/go-toml/v2（未知键保留） |
 | 核心模糊匹配 | core 内 Matcher；后续可接 nucleo（纯匹配无 UI） |
 | CLI 交互 | fzf（前端捆绑，不进 core） |

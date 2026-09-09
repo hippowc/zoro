@@ -14,9 +14,10 @@
 | 改 core（模型 / analyze / 查询 / 渲染 / 扩展接口） | `facts/architecture.md` → `facts/decisions.md` | `tools/build-test.md` |
 | 改 CLI 或 Web / 跑测试验证 | `tools/build-test.md` | `tools/verify.md`；`facts/pitfalls.md` |
 | 构建 / 发布 macOS Launcher | `tools/launcher-build-release.md` → `skills/ship-launcher-release.md` | `facts/pitfalls.md` |
-| 改 Launcher 前端（Tailwind 样式 / Alpine 状态 / 窗口尺寸） | `../ext/zoro-launcher/frontend/README.md` → `tools/launcher-build-release.md`（前端构建节） | `facts/pitfalls.md` P-6…P-12；`facts/decisions.md` AD-12 |
+| 改 Launcher 前端（Tailwind 样式 / Alpine 状态 / 窗口尺寸） | `../ext/zoro-launcher/frontend/README.md` → `tools/launcher-build-release.md`（前端构建节） | `facts/pitfalls.md` P-6…P-14；`facts/decisions.md` AD-12 |
+| 给 Launcher **加新能力**（输入框命令 / 片段捕获 / 视图扩展 / 脑图） | `journal/2026-09-09-launcher-command-surface-and-view-extension-plan.md`（含已核验源码事实 F-1…F-18、禁令清单、待拍板 D1–D6） | `../todos.md` 看板 5.5 / 9.8–9.11；`facts/pitfalls.md` P-13、P-14 |
 | 配置 Launcher UI 主题与快捷键 | `tools/launcher-build-release.md`（UI 主题配置节） | `journal/2026-09-08-launcher-ui-enhancements.md` |
-| 排查询询失败 / 透明窗口 / Gatekeeper 等已知坑 | `facts/pitfalls.md` | `facts/decisions.md`（相关决策） |
+| 排查询询失败 / 透明窗口 / Gatekeeper / CLI 卡住不出结果 等已知坑 | `facts/pitfalls.md` | `facts/decisions.md`（相关决策） |
 | 运行验收清单 | `tools/verify.md` | `scripts/verify.sh` |
 | 维护公网下载网关 | `tools/download-gateway.md` | — |
 | 看下一步做什么 | `../todos.md` | `facts/decisions.md`（待定 / 已否决项） |
