@@ -1,12 +1,11 @@
 package core
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+	"sync"
 )
 
 // Library is one knowledge base: name + content root + config + content blocks.
@@ -15,11 +14,19 @@ type Library struct {
 	Name   string
 	Root   string
 	Config LibraryConfig
-	// DataDir, when non-empty, redirects derived files (manifest + readable
-	// TSV) into DataDir/<Name>/ instead of the content root.
+	// DataDir, when non-empty, redirects derived files (the bbolt store) into
+	// DataDir/<Name>/ instead of the content root.
 	DataDir string
 	Blocks  []Block
-	store   *Store
+
+	// mu serializes refresh/rebuild: a resident frontend can call Query from
+	// several goroutines, and two concurrent rebuilds would fight over the lock.
+	mu sync.Mutex
+	// fps mirrors the store's fingerprint bucket. When it matches what is on
+	// disk, refreshing needs no store access at all — which is the only reason
+	// a CLI command and a resident Launcher can share one library, since bbolt
+	// takes an exclusive lock (see withStore and pitfalls P-13).
+	fps map[string]FileFingerprint
 }
 
 // OpenLibrary fully scans a content root (online mode; block.Raw is populated).
@@ -52,37 +59,60 @@ func OpenLibraryCachedWithConfig(name, root string, config LibraryConfig) (*Libr
 func OpenLibraryCachedWithConfigAndData(name, root string, config LibraryConfig, dataDir string) (*Library, error) {
 	lib := &Library{Name: name, Root: root, Config: config, DataDir: dataDir}
 
-	// Open store and try migration from meta.json.
-	store, err := OpenStore(lib.DBPath())
-	if err != nil {
+	var (
+		blocks []Block
+		stored map[string]FileFingerprint
+	)
+	// 一次作用域内读完就关锁：冷启动是唯一需要读 store 的地方。
+	if err := lib.withStore(func(s *Store) error {
+		var err error
+		blocks, err = s.ReadBlocks(lib.Name)
+		if err != nil {
+			return err
+		}
+		if len(blocks) == 0 {
+			// Try migrating from the legacy meta.json.
+			migrated, mErr := s.MigrateFromMetaJSON(lib.legacyMetaPath(), lib.Name)
+			if mErr != nil {
+				return mErr
+			}
+			if migrated {
+				if blocks, err = s.ReadBlocks(lib.Name); err != nil {
+					return err
+				}
+			}
+		}
+		stored, err = s.ReadFingerprints()
+		return err
+	}); err != nil {
 		return nil, err
 	}
-	lib.store = store
 
-	// Check if store has data.
-	blocks, _ := store.ReadBlocks(lib.Name)
-	if len(blocks) > 0 {
-		lib.Blocks = blocks
+	if len(blocks) == 0 {
+		// No store data and nothing to migrate: full rebuild.
+		if _, err := lib.Analyze(true); err != nil {
+			return nil, err
+		}
 		return lib, nil
 	}
-
-	// Try migrating from meta.json.
-	oldMetaPath := lib.legacyMetaPath()
-	migrated, err := store.MigrateFromMetaJSON(oldMetaPath, lib.Name)
-	if err != nil {
-		return nil, err
-	}
-	if migrated {
-		blocks, _ = store.ReadBlocks(lib.Name)
-		lib.Blocks = blocks
-		return lib, nil
-	}
-
-	// No store data, no migration possible: full rebuild.
-	if _, err := lib.Analyze(true); err != nil {
-		return nil, err
-	}
+	lib.Blocks = blocks
+	lib.fps = stored
 	return lib, nil
+}
+
+// withStore opens the store, runs fn, and always closes it before returning.
+//
+// ⚠️ 这是唯一的 store 访问入口，也是「绝不跨调用持有 store」这条律的执行点：
+// bbolt 拿的是 flock 独占锁（读写互斥），一旦常驻持有，同库的 CLI 命令就会
+// 在 OpenStore 上等到超时并失败 —— 常驻型前端（Launcher）尤其不能持有。
+// 代价是每次冷刷新多一次 open/mmap（约 1ms），换来的是零跨进程争用。
+func (l *Library) withStore(fn func(*Store) error) error {
+	s, err := OpenStore(l.DBPath())
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	return fn(s)
 }
 
 // MetaPath returns the library manifest path (now the bbolt store).
@@ -106,85 +136,96 @@ func (l *Library) legacyMetaPath() string {
 	return filepath.Join(l.Root, ".zoro", "meta.json")
 }
 
-// IndexViewPath returns the readable TSV view path.
-func (l *Library) IndexViewPath() string {
-	if l.DataDir != "" {
-		return filepath.Join(l.DataDir, l.Name, "zoro-index.tsv")
-	}
-	return filepath.Join(l.Root, "zoro-index.tsv")
-}
-
-// IsStale reports whether some markdown file is newer than the manifest
-// (or the manifest is missing). Kept as a coarse check for callers.
-func (l *Library) IsStale() (bool, error) {
-	p := l.MetaPath()
-	info, err := os.Stat(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return true, nil
-		}
-		return false, err
-	}
-	return hasNewerMD(l.Root, info.ModTime())
-}
-
 // Analyze ensures the store is fresh, then returns its path.
 //
 // Freshness is file-level: `(path, mtime, size)` fingerprints are compared so
 // only added / changed / removed markdown files trigger rescans.
 func (l *Library) Analyze(force bool) (string, error) {
-	// Ensure store is open.
-	if l.store == nil {
-		s, err := OpenStore(l.DBPath())
-		if err != nil {
-			return "", err
-		}
-		l.store = s
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.refresh(force); err != nil {
+		return "", err
 	}
+	return l.DBPath(), nil
+}
 
+// Refresh syncs Blocks with the content root, returning any failure instead of
+// swallowing it. Query() refreshes best-effort; frontends that want to tell the
+// user「索引被占用 / 库目录不可读」should call this explicitly (e.g. on show).
+func (l *Library) Refresh() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.refresh(false)
+}
+
+// refresh is the single sync path shared by Analyze / Refresh / Query.
+// It must be called with l.mu held.
+func (l *Library) refresh(force bool) error {
 	files, err := listMDFiles(l.Root)
 	if err != nil {
-		return "", err
+		return err
 	}
 	now := fingerprintFiles(files)
 
-	if force {
-		return l.DBPath(), l.rebuildFull(now)
-	}
-
-	// Try loading fingerprints from store.
-	prevFPs, err := l.store.ReadFingerprints()
-	if err != nil || len(prevFPs) == 0 {
-		return l.DBPath(), l.rebuildFull(now)
-	}
-
-	dirty, removed := diffFingerprints(prevFPs, now)
-	if len(dirty) == 0 && len(removed) == 0 {
-		// Load blocks from store.
-		blocks, err := l.store.ReadBlocks(l.Name)
-		if err != nil {
-			return "", err
+	// 快路径：内存指纹与磁盘一致 → 本次刷新**完全不打开 store**。
+	// 常驻 Launcher 的绝大多数 Query 都走这里，因此不会与 CLI 抢锁。
+	if !force && len(l.fps) > 0 {
+		dirty, removed := diffFingerprints(l.fps, now)
+		if len(dirty) == 0 && len(removed) == 0 {
+			return nil
 		}
-		l.Blocks = blocks
-		return l.DBPath(), nil
 	}
 
-	// Load existing blocks for incremental rebuild.
-	prevBlocks, _ := l.store.ReadBlocks(l.Name)
-	return l.DBPath(), l.rebuildIncrementalStore(prevBlocks, files, now, dirty, removed)
+	return l.withStore(func(s *Store) error {
+		if force {
+			if err := l.Rescan(); err != nil {
+				return err
+			}
+			return l.writeAll(s, now)
+		}
+
+		prev := l.fps
+		if len(prev) == 0 {
+			stored, readErr := s.ReadFingerprints()
+			if readErr != nil {
+				return readErr
+			}
+			prev = stored
+		}
+		if len(prev) == 0 {
+			// 首次接触这个库：全量扫描。Blocks 已由在线模式（OpenLibrary*）
+			// 填好时不重复扫，只补写 store —— 与旧 ensureFresh 语义一致。
+			if l.Blocks == nil {
+				if err := l.Rescan(); err != nil {
+					return err
+				}
+			}
+			return l.writeAll(s, now)
+		}
+
+		dirty, removed := diffFingerprints(prev, now)
+		if len(dirty) == 0 && len(removed) == 0 {
+			// store 是新鲜的，只是本进程的内存副本还没加载。
+			blocks, err := s.ReadBlocks(l.Name)
+			if err != nil {
+				return err
+			}
+			l.Blocks = blocks
+			l.fps = now
+			return nil
+		}
+
+		prevBlocks, err := s.ReadBlocks(l.Name)
+		if err != nil {
+			return err
+		}
+		return l.rebuildIncremental(s, prevBlocks, files, now, dirty, removed)
+	})
 }
 
-// rebuildFull rescans every file and rewrites store.
-func (l *Library) rebuildFull(files map[string]FileFingerprint) error {
-	if err := l.Rescan(); err != nil {
-		return err
-	}
-	return l.writeAll(files)
-}
-
-// rebuildIncrementalStore keeps unchanged blocks from the previous store and
+// rebuildIncremental keeps unchanged blocks from the previous store and
 // rescans only dirty files; removed files drop their blocks.
-func (l *Library) rebuildIncrementalStore(prevBlocks []Block, files []mdFile, now map[string]FileFingerprint, dirty, removed map[string]bool) error {
+func (l *Library) rebuildIncremental(s *Store, prevBlocks []Block, files []mdFile, now map[string]FileFingerprint, dirty, removed map[string]bool) error {
 	byRel := make(map[string]mdFile, len(files))
 	for _, f := range files {
 		byRel[f.Rel] = f
@@ -227,18 +268,21 @@ func (l *Library) rebuildIncrementalStore(prevBlocks []Block, files []mdFile, no
 	})
 
 	l.Blocks = out
-	return l.writeAll(now)
+	return l.writeAll(s, now)
 }
 
-// writeAll writes the store (blocks + fingerprints + meta).
-func (l *Library) writeAll(files map[string]FileFingerprint) error {
-	if err := l.store.WriteBlocks(l.Blocks); err != nil {
+// writeAll writes the store (blocks + fingerprints + meta) and adopts `files`
+// as the in-memory fingerprint mirror, so the next refresh can take the
+// no-store fast path.
+func (l *Library) writeAll(s *Store, files map[string]FileFingerprint) error {
+	if err := s.WriteBlocks(l.Blocks); err != nil {
 		return err
 	}
-	if err := l.store.WriteFingerprints(files); err != nil {
+	if err := s.WriteFingerprints(files); err != nil {
 		return err
 	}
-	return l.store.WriteLibraryMeta(l.Name, l.Root)
+	l.fps = files
+	return s.WriteLibraryMeta(l.Name, l.Root)
 }
 
 // Rescan reloads all blocks from the content root.
@@ -248,39 +292,6 @@ func (l *Library) Rescan() error {
 		return err
 	}
 	l.Blocks = blocks
-	return nil
-}
-
-func (l *Library) writeIndexView() error {
-	return atomicWrite(l.IndexViewPath(), []byte(ToTSV(l.Blocks)))
-}
-
-// readManifest loads and validates a manifest, but does not mutate Blocks.
-func (l *Library) readManifest() (Manifest, error) {
-	data, err := os.ReadFile(l.MetaPath())
-	if err != nil {
-		return Manifest{}, err
-	}
-	m, err := ManifestFromJSON(string(data))
-	if err != nil {
-		return Manifest{}, err
-	}
-	if m.Schema != Schema {
-		return Manifest{}, fmt.Errorf("unsupported manifest schema %d (expected %d)", m.Schema, Schema)
-	}
-	if m.Library.Name != l.Name {
-		return Manifest{}, fmt.Errorf("manifest library name %q does not match workspace declaration %q", m.Library.Name, l.Name)
-	}
-	return m, nil
-}
-
-// loadManifest reads the manifest into Blocks.
-func (l *Library) loadManifest() error {
-	m, err := l.readManifest()
-	if err != nil {
-		return err
-	}
-	l.Blocks = m.IntoBlocks(l.Name)
 	return nil
 }
 
@@ -314,53 +325,16 @@ func (l *Library) LoadRaw(block *Block) (string, error) {
 
 // Query searches this library's blocks, auto-refreshing if files changed.
 func (l *Library) Query(q string) []Candidate {
-	// Auto-refresh: check fingerprints and rebuild incrementally if needed.
-	if err := l.ensureFresh(); err != nil {
-		// Non-fatal: continue with stale blocks rather than failing the query.
-	}
+	// 尽力刷新：store 被别的进程占用（ErrStoreLocked）或库目录不可读时，
+	// 不该让搜索失败 —— 内存里的 Blocks 仍然可搜。需要把原因告诉用户的
+	// 前端应显式调用 Refresh()（见 Launcher 的 Status）。
+	_ = l.Refresh()
 
 	faces := l.ActiveFaces()
 	if len(faces) == 0 {
 		faces = []Face{IndexFace{W: DefaultWeightIndex}}
 	}
 	return SearchMultiFace(faces, l.Blocks, l.Name, q)
-}
-
-// ensureFresh checks file fingerprints and triggers incremental rebuild if needed.
-func (l *Library) ensureFresh() error {
-	// Ensure store is open.
-	if l.store == nil {
-		s, err := OpenStore(l.DBPath())
-		if err != nil {
-			return err
-		}
-		l.store = s
-	}
-
-	files, err := listMDFiles(l.Root)
-	if err != nil {
-		return err
-	}
-	now := fingerprintFiles(files)
-
-	prevFPs, err := l.store.ReadFingerprints()
-	if err != nil || len(prevFPs) == 0 {
-		// No fingerprints yet: if we already have blocks in memory (from Rescan),
-		// just write them to the store. Otherwise do a full rebuild.
-		if len(l.Blocks) > 0 {
-			return l.writeAll(now)
-		}
-		return l.rebuildFull(now)
-	}
-
-	dirty, removed := diffFingerprints(prevFPs, now)
-	if len(dirty) == 0 && len(removed) == 0 {
-		return nil // Fresh, no changes.
-	}
-
-	// Incremental rebuild.
-	prevBlocks, _ := l.store.ReadBlocks(l.Name)
-	return l.rebuildIncrementalStore(prevBlocks, files, now, dirty, removed)
 }
 
 // ActiveFaces resolves the configured face instances.
@@ -370,14 +344,6 @@ func (l *Library) ActiveFaces() []Face {
 		names = DefaultFaces()
 	}
 	return BuildFaces(names, l.Config.FaceWeights)
-}
-
-// Close releases the underlying store resources.
-func (l *Library) Close() error {
-	if l.store != nil {
-		return l.store.Close()
-	}
-	return nil
 }
 
 // fingerprintFiles builds the `(path, mtime, size)` fingerprints for a file list.
@@ -405,20 +371,6 @@ func diffFingerprints(prev, now map[string]FileFingerprint) (dirty, removed map[
 		}
 	}
 	return dirty, removed
-}
-
-// hasNewerMD reports whether the root has a markdown file newer than `since`.
-func hasNewerMD(root string, since time.Time) (bool, error) {
-	files, err := listMDFiles(root)
-	if err != nil {
-		return false, err
-	}
-	for _, f := range files {
-		if f.MTime.After(since) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // atomicWrite writes via a temp file and renames it over the destination.

@@ -59,6 +59,7 @@ func (w *Workspace) LibraryNames() []string {
 }
 
 // AnalyzeAll runs analyze on every library; force=true unconditionally rescans.
+// It stops at the first failure.
 func (w *Workspace) AnalyzeAll(force bool) error {
 	for _, lib := range w.Libraries {
 		if _, err := lib.Analyze(force); err != nil {
@@ -68,10 +69,14 @@ func (w *Workspace) AnalyzeAll(force bool) error {
 	return nil
 }
 
-// Close releases all library store resources.
-func (w *Workspace) Close() error {
+// RefreshAll syncs every library with its content root and returns the first
+// failure. Unlike Query, it does not swallow errors — frontends use it to tell
+// the user why an index is unusable (e.g. core.ErrStoreLocked).
+func (w *Workspace) RefreshAll() error {
 	for _, lib := range w.Libraries {
-		lib.Close()
+		if err := lib.Refresh(); err != nil {
+			return fmt.Errorf("刷新库 %s: %w", lib.Name, err)
+		}
 	}
 	return nil
 }

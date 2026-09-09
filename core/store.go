@@ -2,9 +2,11 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -16,7 +18,17 @@ const (
 	bucketFingerprints = "fingerprints"
 	keySchemaVersion   = "schema"
 	keyLibraryMeta     = "library"
+
+	// storeOpenTimeout 限定抢文件锁的等待时间。bbolt 的默认值 0 是「每 50ms
+	// 重试、永不放弃、永不报错」，于是「另一个进程占着这个库」会表现成
+	// 命令行永久卡死（见 kb/facts/pitfalls.md P-13）。
+	storeOpenTimeout = 300 * time.Millisecond
 )
+
+// ErrStoreLocked 表示这个库的索引正被另一个 zoro 进程独占。
+// bbolt 取的是 flock 独占锁，读写模式之间也互斥，所以常驻型前端必须
+// 「用完即关」（见 Library.withStore），否则 CLI 完全无法使用同一个库。
+var ErrStoreLocked = errors.New("知识库索引正被另一个 zoro 进程占用（请先退出它）")
 
 // Store wraps a bbolt database for one library.
 type Store struct {
@@ -29,8 +41,11 @@ func OpenStore(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := bolt.Open(path, 0o600, nil)
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: storeOpenTimeout})
 	if err != nil {
+		if errors.Is(err, bolt.ErrTimeout) {
+			return nil, fmt.Errorf("%w: %s", ErrStoreLocked, path)
+		}
 		return nil, fmt.Errorf("open store %s: %w", path, err)
 	}
 	s := &Store{db: db, path: path}

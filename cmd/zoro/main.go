@@ -21,7 +21,7 @@ commands:
   open <query> [--print]         打开第一条命中所在源文件（--print 仅打印路径）
   html <query>                   取第一条命中，渲染 Markdown → HTML
   text <query>                   取第一条命中，渲染为终端文本（TTY 彩色 ANSI，否则纯文本）
-  index                          强制重建所有库的 manifest + zoro-index.tsv
+  index                          强制重建所有库的索引（bbolt store）
   serve                          启动本地 Web（P2，尚未实现）
 
 无子命令：若 zoro.toml 声明了 default，则浏览该库全部条目。

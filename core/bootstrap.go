@@ -65,8 +65,8 @@ func DefaultIndexDir() (string, error) {
 //   - index dir      ~/.zoro/index
 //
 // It returns the absolute workspace path. Library roots are always written as
-// absolute paths, and the index dir is explicitly recorded so manifest + TSV
-// stay inside the config directory instead of polluting the content root.
+// absolute paths, and the index dir is explicitly recorded so the bbolt store
+// stays inside the config directory instead of polluting the content root.
 func EnsureDefaultWorkspace() (string, error) {
 	cfgDir, err := DefaultConfigDir()
 	if err != nil {
@@ -118,7 +118,6 @@ func EnsureDefaultWorkspace() (string, error) {
 		if _, err := lib.Analyze(true); err != nil {
 			// Non-fatal: store will be built on first query/index command.
 		}
-		ws.Close() // Release all store file locks.
 	}
 
 	return wsPath, nil
