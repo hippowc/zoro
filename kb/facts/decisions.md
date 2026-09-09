@@ -136,6 +136,25 @@
   - 命令面没有历史、没有多行编辑、没有真正的解析器（不支持引号），命令一复杂就得升级成别的交互。
   - 一次回车只做一件事：`/lib add` 需要两次回车（选目录 → 确认），比「一步到位」多一次按键，换来的是不可逆写入永远经过一次明示确认。
 
+## AD-18 可视化块（脑图这类）：存储面永远是文本，编辑面可以不是（决策点 D5 已定）
+
+- **选择**：把「存储」与「编辑」彻底分开——**存储面永远是纯文本 Markdown**（AD-4 不动摇），**编辑面可以是完全可视化的控件**（拖节点、画框，用户一个字都不敲），两者之间按 kind 注册一个 **codec**（文本 ⇄ 结构化对象）。每种特殊片段 = `{codec, view, actions}` 三元组，`view` / `actions` 留在前端注册表，**core 不因 kind 增加而改动**：它只提供 `LoadRaw`（取块文本）/ `UpdateBlock`（整块替换 + `expect` 乐观并发）/ `RenderMarkdownHTML`（静态兜底渲染）三件通用能力。脑图载荷用 **Markdown 嵌套列表**（`@mindmap <terms>` + `-` 列表），可视化用 **markmap**（MIT，`0.18.12`，已核验 npm：只有 lib/view/toolbar，**没有 editor 包**，即它是纯可视化、不给拖拽改结构；`markmap-view` 依赖 d3）。**分两阶段**：阶段 A「textarea + 实时脑图预览」——codec 是**恒等函数**，于是「序列化幂等/字节稳定」这个最难的风险自动消失、git diff 零噪声；阶段 B「拖拽节点」只有在 A 用不顺时才做（先评估 Tab/Shift-Tab 缩进是否已够用，那是 A 的增量且同样不需要 codec）。完整调研与能力矩阵见 `../journal/2026-09-09-visual-blocks-storage-vs-editing-surface.md`。
+- **否决**：
+  - **节点级操作进 core**（如 `UpdateMindmapNode(lib, path, start, nodeID, …)`）：① core 会因此认识每种 kind 的内部结构，违反「core 不放 UI/视图概念」；② 节点级 patch 要求 core 理解嵌套列表缩进语义，而那正是 codec 的职责——**两处定义必然漂移**；③ 收益不存在，整块替换 + `expect` 已是最小可用的乐观并发（AD-15），块只有几十行。
+  - **JSON blob 存脑图**：不可 diff、合并敌对、用户无法手写、`RenderMarkdownHTML` 给不出任何有意义的降级展示。
+  - **4 空格缩进大纲**（不带列表标记）：goldmark 当**代码块** → 渲染成 `<pre>`，树结构全丢；且缩进的 `@xxx` 行会被 `StripDirectives` 吃掉，节点名不能以 `@` 开头。
+  - **CRDT（Yjs / Automerge）**：我们是单机工具，并发方是「Launcher + CLI + 用户编辑器」而非多用户实时协同；CRDT 需要旁路元数据，会让「**文件字节 == 用户内容**」失效，直接违反 AD-4。
+  - **私有二进制 / SQLite 存内容**、**`.canvas` 式独立格式文件**：造第二内容源，用户的库不再能被 grep / git diff / 静态站点 / 别的编辑器消费（Notion 导出有损、Obsidian Canvas 成飞地，都是实证）。将来要自由画布，照 Excalidraw 的 `.excalidraw.md` 做法——把 JSON 塞进 .md 的 fenced code block，文件仍是合法 Markdown（优先级 P5+，现在不做）。
+  - **Mermaid `mindmap` 当主路径**：**单向**渲染，图不能拖回文本；只适合当只读降级展示。
+  - **core 里加 `View` / `Codec` 概念**：三个前端（CLI / Web / Launcher）展示能力天差地别，core 一旦有 view 概念就会被最弱的那个拖着走。core 只出 `target`（html/ansi/text），`kind → view` 永远在前端。
+- **理由**：用户的疑问「是否一定要文本」其实是三个问题，答案不同——**落盘格式必须是文本**（否则丢掉整个 Markdown 生态），**用户操作不必经过文本**（编辑面与存储契约正交），**core 必须不理解块结构**（否则每加一种可视化块都要动三个前端共享的地基）。分开答这三条，才能既保住 AD-4 又拿到可视化编辑。
+- **代价**：
+  - 阶段 B 若真要做，`encode(decode(t))` 必须**逐字节相同**，这是个难验收的硬约束（做不到就不要上线，否则每次保存都在用户 git 历史里制造噪声）。
+  - vendor markmap 会带进 **d3**，体积不小，落地前要先量（与 Alpine 同样纪律：vendor 进 `frontend/dist/`、离线运行、绝不走 CDN）。
+  - 大纲正文当前**不可搜**（`raw` 面是桩）。「搜到脑图节点」属于 P4 全文面，不得在脑图特性里顺手做——会破坏 AD-6 的三面演进顺序。
+  - 脑图 view 必须自己声明 `maxHeight`（否则 580px 上限会把它压扁），于是「窗口高度上限」从常量变成了视图属性。
+- **何时重新考虑**：需要多人实时协同时（那时 CRDT 的收益才可能盖过它破坏 AD-4 的代价）；或需要自由坐标画布时（走 §5 的 fenced code block 方案，仍不换存储格式）。
+
 ## 补记：已实现但未记录的决策（流程漂移）
 
 > 这两项**代码已落地**，但当时没写 AD。此处只补记「选了什么、代价是什么」，
@@ -163,7 +182,8 @@
   - D3 命令符号选型 → **已定**，AD-17（`/verb`；`@` 因为已是内容标签符号被否决）。
   - D4 store 生命周期 → **已定**，AD-13「已付代价」+ P-13（fixed）。
   - D6 `capture_file` 归属 → **已定**：库级配置（`LibraryConfig.Extra["capture_file"]`），默认 `inbox.md`，见 `Library.CaptureFile()`；前端还没有暴露它（捕获 UI 未实现）。
-  - D5 脑图载荷格式 → **仍待定**，属于扩展方案沉淀任务（看板 9.11）。
+  - D5 脑图载荷格式 → **已定**，AD-18（Markdown 嵌套列表 + markmap 可视化；阶段 A 用**恒等 codec**，把「序列化幂等」这个风险直接消掉）。调研与两阶段实施见 `../journal/2026-09-09-visual-blocks-storage-vs-editing-surface.md`。
+- ✅ **D1–D6 已全部拍板**，不要再当开放问题重新讨论；要推翻其中任一条，先在对应 AD 的「何时重新考虑」里找到触发条件。
 - tag / facet：标签名即 facet；按 facet 过滤的 query（如 `-t video`）待做。
 - 同主题块聚合：`index` 与同主题 `shell`/`video` 并排命中是否聚合成「主题行」，留待 P3 交互设计。
 - 稳定条目 id：暂用 `(库名, path, start)`；跨编辑引用跳转需再引入内容锚点。
