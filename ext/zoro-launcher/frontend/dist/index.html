@@ -9,24 +9,24 @@
   <body>
     <main class="shell">
       <header class="top" style="--wails-draggable: drag">
-        <div class="search-box" style="--wails-draggable: drag">
+        <div class="search-box">
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input id="query" class="query" type="search" placeholder="搜索 zoro…"
                  autocomplete="off" style="--wails-draggable: no-drag" />
           <button id="clear" class="clear-btn" type="button" title="清空" aria-label="清空"
                   style="--wails-draggable: no-drag">×</button>
         </div>
+        <div id="summary" class="summary is-hidden"></div>
       </header>
 
-      <section id="body" class="body is-hidden">
-        <div id="summary" class="summary"></div>
-        <ul id="results" class="results" style="--wails-draggable: no-drag"></ul>
-        <article id="preview" class="preview" style="--wails-draggable: no-drag">
+      <section id="body" class="body">
+        <ul id="results" class="results"></ul>
+        <article id="preview" class="preview">
           <button id="backBtn" class="back-btn" type="button" title="返回搜索" aria-label="返回搜索">←</button>
         </article>
       </section>
 
-      <footer class="status">
+      <footer class="status is-hidden">
         <span id="status">启动中…</span>
         <span class="hint">↵ 详情 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏/返回</span>
       </footer>

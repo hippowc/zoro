@@ -1,7 +1,6 @@
 (function () {
   "use strict";
 
-  // Load theme from bridge config (falls back to default light-glass)
   var bridge = window.go && window.go.main && window.go.main.App;
   if (!bridge) {
     var statusFallback = document.getElementById("status");
@@ -9,11 +8,10 @@
     return;
   }
 
-  // Apply theme early to avoid FOUC
   if (bridge.GetTheme) {
     bridge.GetTheme().then(function (theme) {
       if (theme) document.documentElement.setAttribute("data-theme", theme);
-    }).catch(function () { /* ignore, use default */ });
+    }).catch(function () {});
   }
 
   var queryEl = document.getElementById("query");
@@ -25,10 +23,11 @@
   var summaryEl = document.getElementById("summary");
   var backBtn = document.getElementById("backBtn");
   var shellEl = document.querySelector(".shell");
+  var statusFooterEl = document.querySelector(".status");
 
   var current = [];
   var active = -1;
-  var detailMode = false; // Track if we're in detail mode
+  var detailMode = false;
 
   function escapeHtml(s) {
     return String(s == null ? "" : s)
@@ -45,7 +44,6 @@
     var dec = new TextDecoder();
     var bytes = enc.encode(text);
 
-    // core 的 MatchRange 使用 UTF-8 byte offsets，且都落在合法码点边界。
     var ranges = matches
       .filter(function (r) { return r && r.end > r.start; })
       .sort(function (a, b) { return a.start - b.start; });
@@ -81,58 +79,60 @@
   function setSummary(text) {
     if (!summaryEl) return;
     summaryEl.textContent = text || "";
+    if (text) {
+      summaryEl.classList.remove("is-hidden");
+    } else {
+      summaryEl.classList.add("is-hidden");
+    }
   }
 
   function updateClear() {
     clearBtn.classList.toggle("is-visible", queryEl.value.length > 0);
   }
 
-  function showResults() {
-    bodyEl.classList.remove("is-hidden");
-    bodyEl.classList.add("show-results");
-    bodyEl.classList.remove("show-preview");
-    previewEl.innerHTML = "";
-    if (shellEl) {
-      shellEl.classList.remove("hide-status");
-    }
-  }
-
-  function showPreview() {
-    bodyEl.classList.remove("is-hidden");
-    bodyEl.classList.remove("show-results");
-    bodyEl.classList.add("show-preview");
+  function showBody() {
+    bodyEl.classList.add("is-visible");
+    if (statusFooterEl) statusFooterEl.classList.remove("is-hidden");
   }
 
   function hideBody() {
-    bodyEl.classList.add("is-hidden");
-    bodyEl.classList.remove("show-results", "show-preview", "show-detail");
+    bodyEl.classList.remove("is-visible", "show-results", "show-preview", "show-detail");
     resultsEl.innerHTML = "";
-    previewEl.innerHTML = "";
+    previewEl.innerHTML = backBtn ? backBtn.outerHTML : "";
     current = [];
     active = -1;
     detailMode = false;
-    if (shellEl) {
-      shellEl.classList.add("hide-status");
-      shellEl.classList.remove("show-detail");
-    }
+    setSummary("");
+    if (statusFooterEl) statusFooterEl.classList.add("is-hidden");
+    if (shellEl) shellEl.classList.remove("show-detail");
+  }
+
+  function showResults() {
+    bodyEl.classList.remove("show-preview", "show-detail");
+    bodyEl.classList.add("show-results");
+    previewEl.innerHTML = backBtn ? backBtn.outerHTML : "";
+    showBody();
+  }
+
+  function showPreview() {
+    bodyEl.classList.remove("show-results", "show-detail");
+    bodyEl.classList.add("show-preview");
+    showBody();
   }
 
   function showDetailMode() {
     detailMode = true;
-    bodyEl.classList.remove("is-hidden", "show-results", "show-preview");
+    bodyEl.classList.remove("show-results", "show-preview");
     bodyEl.classList.add("show-detail");
-    if (shellEl) {
-      shellEl.classList.add("show-detail");
-    }
+    showBody();
+    if (shellEl) shellEl.classList.add("show-detail");
   }
 
   function exitDetailMode() {
     detailMode = false;
     bodyEl.classList.remove("show-detail");
     bodyEl.classList.add("show-results");
-    if (shellEl) {
-      shellEl.classList.remove("show-detail");
-    }
+    if (shellEl) shellEl.classList.remove("show-detail");
   }
 
   function renderResults(candidates) {
@@ -140,7 +140,6 @@
     active = -1;
     resultsEl.innerHTML = "";
 
-    // 没有匹配时不展示结果区，避免空白面板。
     if (!current.length) {
       hideBody();
       return;
@@ -190,18 +189,16 @@
 
     var c = current[i];
     var idx = i;
-    
-    // If in detail mode, just update preview content without changing view
+
     if (!detailMode) {
       showPreview();
     }
-    
+
     bridge.LoadRaw(c.library, c.path, c.start)
       .then(function (raw) { return bridge.RenderHTML(raw || ""); })
       .then(function (html) {
         if (active !== idx) return;
-        // Preserve back button when updating preview
-        var backBtnHtml = previewEl.querySelector('.back-btn') ? previewEl.querySelector('.back-btn').outerHTML : '';
+        var backBtnHtml = backBtn ? backBtn.outerHTML : "";
         previewEl.innerHTML = backBtnHtml + html;
         setStatus("");
       })
@@ -298,13 +295,12 @@
 
   document.addEventListener("keydown", function (e) {
     var meta = e.metaKey || e.ctrlKey;
-    
+
     // Ignore Enter during IME composition (e.g., Chinese input method)
     if (e.isComposing || e.keyCode === 229) {
       return;
     }
-    
-    // Esc: exit detail mode or hide launcher
+
     if (e.key === "Escape") {
       e.preventDefault();
       if (detailMode) {
@@ -314,7 +310,7 @@
       }
       return;
     }
-    
+
     if (e.key === "ArrowDown") {
       e.preventDefault();
       move(1);
@@ -330,17 +326,14 @@
       if (meta) {
         openActive();
       } else {
-        // Enter switches to detail mode
         ensureActive();
         showDetailMode();
-        // Re-select current item to update preview
         if (active >= 0 && active < current.length) {
           select(active);
         }
       }
       return;
     }
-    // Cmd+C / Ctrl+C for copy
     if ((e.key === "c" || e.key === "C") && meta) {
       e.preventDefault();
       copyActive();
@@ -348,22 +341,18 @@
     }
   });
 
-  // Back button click handler
-  if (backBtn) {
-    backBtn.addEventListener("click", function () {
-      if (detailMode) {
-        exitDetailMode();
-      }
-    });
-  }
+  // Event delegation for back button (survives innerHTML updates)
+  previewEl.addEventListener("click", function (e) {
+    var btn = e.target.closest(".back-btn");
+    if (btn && detailMode) {
+      exitDetailMode();
+    }
+  });
 
   bridge.Status()
     .then(function (s) { setStatus(s); })
     .catch(function (e) { setStatus("读取状态失败：" + e); });
 
   updateClear();
-  if (shellEl) {
-    shellEl.classList.add("hide-status");
-  }
   queryEl.focus();
 })();

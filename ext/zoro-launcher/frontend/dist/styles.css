@@ -53,7 +53,9 @@ html, body {
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-/* 外层完全不承担视觉背景，只负责布局与拖拽命中区 */
+/* ============================================================
+   Shell layout
+   ============================================================ */
 .shell {
   display: flex;
   flex-direction: column;
@@ -63,10 +65,14 @@ html, body {
   background: transparent;
 }
 
+/* ============================================================
+   Top area: search box + summary
+   ============================================================ */
 .top {
   flex: none;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .search-box {
@@ -115,7 +121,6 @@ html, body {
 .query::placeholder { color: var(--muted); }
 .query::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
 
-/* 清空按钮内置在搜索框右侧，平常隐藏，输入后浮现 */
 .clear-btn {
   flex: none;
   width: 20px;
@@ -145,72 +150,90 @@ html, body {
   color: var(--fg);
 }
 
-/* Summary above results */
+/* Summary: same glass style as search box, hidden by default */
 .summary {
-  flex: none;
-  padding: 4px 12px;
+  padding: 5px 14px;
   color: var(--muted);
   font-size: 12px;
   background: var(--glass);
-  border-radius: 8px 8px 0 0;
   border: 1px solid var(--stroke);
-  border-bottom: none;
+  border-radius: 10px;
+  box-shadow:
+    0 4px 16px rgba(31, 35, 46, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
+}
+.summary.is-hidden {
+  display: none;
 }
 
-/* 结果区只在有内容时展开收拢，不再预留空白 */
+/* ============================================================
+   Body: results + preview
+   Aggressive hiding to prevent any transparent artifact
+   ============================================================ */
 .body {
   display: none;
+  visibility: hidden;
   flex-direction: column;
   flex: 1 1 auto;
   gap: 10px;
   min-height: 0;
   pointer-events: none;
-  position: relative;
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
 }
-.body:not(.is-hidden) {
+.body.is-visible {
   display: flex;
+  visibility: visible;
   pointer-events: auto;
+  opacity: 1;
+  height: auto;
+  overflow: visible;
 }
-.body.show-preview { 
+
+/* Results + Preview side by side */
+.body.show-preview {
   flex-direction: row;
 }
 .body.show-preview .results {
   flex: 0 0 240px;
   width: 240px;
   min-width: 240px;
-  position: relative;
 }
-.body.show-preview .preview { 
-  display: block; 
-  flex: 1; 
-  min-width: 0; 
+.body.show-preview .preview {
+  display: block;
+  flex: 1;
+  min-width: 0;
 }
-.body.show-results .preview { display: none; }
-.body.show-results .results {
-  position: relative;
-}
-/* Ensure results is completely hidden when body is hidden */
-.body.is-hidden .results,
-.body.is-hidden .preview,
-.body.is-hidden .summary {
-  display: none !important;
+.body.show-results .preview {
+  display: none;
 }
 
 /* Detail mode: full-screen preview, draggable */
 .body.show-detail {
   flex-direction: column;
-  --wails-draggable:drag;
+  --wails-draggable: drag;
 }
-.body.show-detail .results,
-.body.show-detail .summary {
+.body.show-detail .results {
   display: none;
 }
 .body.show-detail .preview {
   display: block;
   flex: 1;
   margin: 0;
+  /* Inherit drag from parent - no inline no-drag */
+}
+.body.show-detail .back-btn {
+  opacity: 1;
+  pointer-events: auto;
+  --wails-draggable: no-drag;
 }
 
+/* ============================================================
+   Results & Preview shared styling
+   ============================================================ */
 .results, .preview {
   margin: 0;
   padding: 8px;
@@ -227,7 +250,7 @@ html, body {
 .results { list-style: none; }
 .preview { display: none; position: relative; }
 
-/* Back button in detail mode */
+/* Back button */
 .back-btn {
   position: absolute;
   top: 8px;
@@ -249,15 +272,13 @@ html, body {
   transition: opacity 0.12s ease, background 0.12s ease;
   z-index: 10;
 }
-.body.show-detail .back-btn {
-  opacity: 1;
-  pointer-events: auto;
-  --wails-draggable:no-drag;
-}
 .back-btn:hover {
   background: rgba(17, 19, 25, 0.14);
 }
 
+/* ============================================================
+   Result items
+   ============================================================ */
 .item { padding: 9px 11px; border-radius: 9px; cursor: pointer; }
 .item:hover { background: rgba(17, 19, 25, 0.05); }
 .item.active { background: var(--active); }
@@ -277,6 +298,7 @@ html, body {
 .item-sub { color: var(--muted); font-size: 11px; margin-top: 3px; opacity: 0.8; }
 .empty { color: var(--muted); padding: 10px; }
 
+/* Preview content */
 .preview {
   font-size: 14px;
   line-height: 1.65;
@@ -290,6 +312,9 @@ html, body {
 }
 .preview a { color: #3157d1; }
 
+/* ============================================================
+   Status bar
+   ============================================================ */
 .status {
   flex: none;
   display: flex;
@@ -301,19 +326,16 @@ html, body {
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .status .hint { white-space: nowrap; opacity: 0.8; }
-
-/* Hide status bar when no results are shown */
-.shell.hide-status .status {
+.status.is-hidden {
   display: none;
 }
 
-/* Detail mode: hide search box, make body draggable */
+/* ============================================================
+   Detail mode: hide search area
+   ============================================================ */
 .shell.show-detail .top {
   display: none;
 }
-.shell.show-detail .body.show-detail {
-  --wails-draggable: drag;
-}
-.shell.show-detail .body.show-detail .back-btn {
-  --wails-draggable: no-drag;
+.shell.show-detail .status {
+  display: none;
 }
