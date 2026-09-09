@@ -400,3 +400,106 @@ func TestAddLibraryToWorkspaceRejectsDuplicate(t *testing.T) {
 		t.Errorf("报错后文件被改动了:\n%s", data)
 	}
 }
+
+/* ------------------------------------------------------------
+   AddLibrary：CLI `zoro add` 与 Launcher `/lib add` 共用的整条链路
+   ------------------------------------------------------------ */
+
+// 链路里最容易被漏掉的三件事：相对 root 的解析基准、库目录的创建、首个库自动设默认。
+func TestAddLibraryFirstLibraryResolvesRootAndSetsDefault(t *testing.T) {
+	dir := t.TempDir()
+	wsPath := filepath.Join(dir, "ws", "zoro.toml") // 声明文件还不存在
+
+	added, err := AddLibrary(wsPath, "notes", "content/notes", false)
+	if err != nil {
+		t.Fatalf("AddLibrary: %v", err)
+	}
+	// 相对路径以 zoro.toml 所在目录为基准，不是进程 cwd（Launcher 的 cwd 是 /）。
+	if want := filepath.Join(dir, "ws", "content", "notes"); added.Root != want {
+		t.Errorf("Root = %q, 期望 %q", added.Root, want)
+	}
+	if !added.CreatedDir {
+		t.Error("CreatedDir 应为 true")
+	}
+	if info, err := os.Stat(added.Root); err != nil || !info.IsDir() {
+		t.Errorf("库目录应已创建: %v", err)
+	}
+	if !added.First || !added.SetDefault {
+		t.Errorf("首个库应自动设为默认: %+v", added)
+	}
+
+	cfg, err := WorkspaceConfigFromPath(wsPath)
+	if err != nil {
+		t.Fatalf("读取新建声明失败: %v", err)
+	}
+	if cfg.Default != "notes" || len(cfg.Libraries) != 1 || cfg.Libraries[0].Root != added.Root {
+		t.Errorf("声明 = %+v", cfg)
+	}
+}
+
+// 第二次添加：既不抢 default，也不动用户手写的注释与未知键。
+func TestAddLibraryKeepsCommentsAndExistingDefault(t *testing.T) {
+	dir := t.TempDir()
+	wsPath := filepath.Join(dir, "zoro.toml")
+	if err := os.WriteFile(wsPath, []byte(commentedTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "ideas")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := AddLibrary(wsPath, "ideas", root, false)
+	if err != nil {
+		t.Fatalf("AddLibrary: %v", err)
+	}
+	if added.CreatedDir || added.First || added.SetDefault {
+		t.Errorf("已存在的目录 + 非首个库: %+v", added)
+	}
+	data, err := os.ReadFile(wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), commentedTOML) {
+		t.Fatalf("原有字节（含注释）应原样保留:\n%s", data)
+	}
+	cfg, err := ParseWorkspaceConfig(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Default != "notes" {
+		t.Errorf("default = %q, 期望仍是 notes", cfg.Default)
+	}
+	if len(cfg.Libraries) != 3 || cfg.Libraries[2].Name != "ideas" {
+		t.Errorf("libraries = %+v", cfg.Libraries)
+	}
+}
+
+// 重名 / 非法库名 / 空 root 一律拒绝，且**不建目录、不改声明文件**。
+func TestAddLibraryRejects(t *testing.T) {
+	dir := t.TempDir()
+	wsPath := filepath.Join(dir, "zoro.toml")
+	if err := os.WriteFile(wsPath, []byte(commentedTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, root string }{
+		{"notes", filepath.Join(dir, "elsewhere")}, // 重名
+		{"../evil", filepath.Join(dir, "x")},       // 非法库名
+		{"", filepath.Join(dir, "x")},              // 空库名
+		{"ok", "   "},                              // 空 root
+	} {
+		if _, err := AddLibrary(wsPath, c.name, c.root, false); err == nil {
+			t.Errorf("AddLibrary(%q, %q) 应报错", c.name, c.root)
+		}
+	}
+	data, err := os.ReadFile(wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != commentedTOML {
+		t.Errorf("报错后声明被改动了:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "elsewhere")); !os.IsNotExist(err) {
+		t.Error("失败路径不该创建目录")
+	}
+}

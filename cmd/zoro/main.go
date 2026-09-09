@@ -183,13 +183,14 @@ func runAdd(args []string) {
 		os.Exit(2)
 	}
 	name, rootArg := pos[0], pos[1]
-	// 库名合法性只有一处定义（core.ValidateLibraryName），Launcher /lib add 同样走它。
+	// 纯输入错误按 usage 处理（exit 2，与本命令其它用法错误一致）；
+	// 判据本身仍然只有 core 一处定义，这里只决定退出码。
 	if err := core.ValidateLibraryName(name); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(2)
 	}
 	if strings.TrimSpace(rootArg) == "" {
-		fmt.Fprintln(os.Stderr, "error: library root must not be empty")
+		fmt.Fprintln(os.Stderr, "error: 库根目录不能为空")
 		os.Exit(2)
 	}
 
@@ -200,53 +201,19 @@ func runAdd(args []string) {
 		}
 	}
 
-	cfg := core.WorkspaceConfig{}
-	if data, err := os.ReadFile(wsPath); err == nil {
-		cfg, err = core.ParseWorkspaceConfig(string(data))
-		if err != nil {
-			fatalf("error: 读取工作区声明失败 %s: %v\n", wsPath, err)
-		}
-	} else if !os.IsNotExist(err) {
-		fatalf("error: 读取工作区声明失败 %s: %v\n", wsPath, err)
-	}
-
-	for _, l := range cfg.Libraries {
-		if l.Name == name {
-			fatalf("error: library %q already exists\n", name)
-		}
-	}
-
-	// 相对路径以 zoro.toml 所在目录为基准解析成绝对路径后再写入。
-	rootAbs := rootArg
-	if !filepath.IsAbs(rootAbs) {
-		rootAbs = filepath.Join(filepath.Dir(wsPath), rootAbs)
-	}
-	rootAbs = filepath.Clean(rootAbs)
-
-	// 首个库且当前没有 default → 自动设为 default（判定基于追加前的数量）。
-	if len(cfg.Libraries) == 0 && cfg.Default == "" {
-		setDefault = true
-	}
-
-	// 新库根目录不存在则创建，保证随后 index / search 立即可用。
-	if _, err := os.Stat(rootAbs); os.IsNotExist(err) {
-		if err := os.MkdirAll(rootAbs, 0o755); err != nil {
-			fatalf("error: 创建库目录失败 %s: %v\n", rootAbs, err)
-		}
-		fmt.Fprintf(os.Stderr, "created: %s\n", rootAbs)
-	} else if err != nil {
-		fatalf("error: 检查库目录失败 %s: %v\n", rootAbs, err)
-	}
-
-	// 外科式追加：除了新增的 [[libraries]] 段，zoro.toml 的其它字节一个不动
-	//（注释、用户手写的顶层未知键都保住）。见 core/configedit.go。
-	if err := core.AddLibraryToWorkspace(wsPath, name, rootAbs, setDefault); err != nil {
+	// 「添加一个库」的整条链路只有 core.AddLibrary 一处定义，Launcher `/lib add` 走同一个函数。
+	// 这里只负责 CLI 特有的输出格式。
+	added, err := core.AddLibrary(wsPath, name, rootArg, setDefault)
+	if err != nil {
 		fatalf("error: %v\n", err)
 	}
+	if added.CreatedDir {
+		fmt.Fprintf(os.Stderr, "created: %s\n", added.Root)
+	}
 
-	fmt.Printf("added\t%s\t%s\n", name, rootAbs)
-	if setDefault {
-		fmt.Printf("default\t%s\n", name)
+	fmt.Printf("added\t%s\t%s\n", added.Name, added.Root)
+	if added.SetDefault {
+		fmt.Printf("default\t%s\n", added.Name)
 	}
 }
 

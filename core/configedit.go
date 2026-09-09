@@ -152,11 +152,90 @@ func SetDefaultLibrary(text, name string) (string, error) {
 	return out, nil
 }
 
+// LibraryAddition 是一次成功添加的报告，供调用方组织给用户的提示。
+type LibraryAddition struct {
+	// Name 是写入声明的库名（已通过 ValidateLibraryName）。
+	Name string
+	// Root 是写入声明的**绝对**路径（相对入参已按 zoro.toml 所在目录解析并 Clean）。
+	Root string
+	// CreatedDir 报告库根目录是本次新建的（调用方通常要告诉用户一声）。
+	CreatedDir bool
+	// SetDefault 报告本次把它设成了默认库。
+	SetDefault bool
+	// First 报告这是工作区里的第一个库（此时 SetDefault 必为 true）。
+	First bool
+}
+
+// AddLibrary 是「添加一个知识库」这条链路的**唯一定义处**：CLI `zoro add` 与
+// Launcher `/lib add` 都走它，两边语义不可能漂移（校验 → 查重 → root 绝对化 →
+// 首个库自动设默认 → 建目录 → 外科式写回声明）。
+//
+// ⚠️ 它**只改声明文件与建目录，不碰索引** —— 索引是调用方的事：CLI 的下一条命令
+// 自己会刷；常驻的 Launcher 必须重载工作区并对新库 Analyze(true)，
+// 漏掉的症状是「加了库但搜不到」（见 kb/journal/2026-09-09 方案 §4.4 第 6、7 步）。
+func AddLibrary(wsPath, name, rootArg string, setDefault bool) (LibraryAddition, error) {
+	if err := ValidateLibraryName(name); err != nil {
+		return LibraryAddition{}, err
+	}
+	if strings.TrimSpace(rootArg) == "" {
+		return LibraryAddition{}, errors.New("库根目录不能为空")
+	}
+
+	cfg := WorkspaceConfig{}
+	if data, err := os.ReadFile(wsPath); err == nil {
+		if cfg, err = ParseWorkspaceConfig(string(data)); err != nil {
+			return LibraryAddition{}, fmt.Errorf("读取工作区声明失败 %s: %w", wsPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return LibraryAddition{}, fmt.Errorf("读取工作区声明失败 %s: %w", wsPath, err)
+	}
+	// 查重在这里做（而不是只靠 AppendLibrarySpec）：声明文件还不存在时也要有同样的错误。
+	for _, l := range cfg.Libraries {
+		if l.Name == name {
+			return LibraryAddition{}, fmt.Errorf("库名已存在: %s", name)
+		}
+	}
+
+	// 相对路径以 zoro.toml 所在目录为基准解析成绝对路径后再写入。
+	root := rootArg
+	if !filepath.IsAbs(root) {
+		root = filepath.Join(filepath.Dir(wsPath), root)
+	}
+	root = filepath.Clean(root)
+
+	// 首个库且当前没有 default → 自动设为 default（判定基于追加前的数量）。
+	first := len(cfg.Libraries) == 0
+	if first && cfg.Default == "" {
+		setDefault = true
+	}
+
+	created := false
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return LibraryAddition{}, fmt.Errorf("创建库目录失败 %s: %w", root, err)
+		}
+		created = true
+	} else if err != nil {
+		return LibraryAddition{}, fmt.Errorf("检查库目录失败 %s: %w", root, err)
+	}
+
+	if err := AddLibraryToWorkspace(wsPath, name, root, setDefault); err != nil {
+		return LibraryAddition{}, err
+	}
+	return LibraryAddition{
+		Name:       name,
+		Root:       root,
+		CreatedDir: created,
+		SetDefault: setDefault,
+		First:      first,
+	}, nil
+}
+
 // AddLibraryToWorkspace appends a library to the `zoro.toml` at path and writes
 // it back atomically. A missing file is seeded from scratch (nothing to lose).
 //
-// 这是 CLI `zoro add` 与 Launcher `/lib add` 共用的唯一实现。
-// 它只管声明文件；创建库目录是调用方的事（两边给用户的提示不同）。
+// ⚠️ 这是 AddLibrary 的**最后一步**（低层：root 必须已绝对化，不查重、不建目录）。
+// 单独导出只为可测性 —— 调用方一律用 AddLibrary。
 func AddLibraryToWorkspace(path, name, root string, setDefault bool) error {
 	text, err := os.ReadFile(path)
 	if err != nil {
