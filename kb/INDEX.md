@@ -7,7 +7,7 @@
 
 | 任务场景 | 先读 | 再按需读 |
 |---|---|---|
-| 刚接手项目，建立全貌 | `../agents.md`（工作流与约定）→ `facts/architecture.md` | `facts/glossary.md`；`../README.md` 用于命令速览 |
+| 刚接手项目，建立全貌 | `../agents.md`（工作流与约定）→ `facts/architecture.md` | `facts/glossary.md`；命令速览在 `tools/cli-usage.md`（⚠️ `../README.md` 已**刻意清空**，不要填回去） |
 | 理解「为什么这么设计、否决过什么」 | `facts/decisions.md` | `facts/architecture.md` |
 | 新增知识库并搜索 / 预览 / 打开 | `tools/cli-usage.md` → `skills/add-library-search-preview.md` | `facts/glossary.md` |
 | 给 Markdown 写 `@` 标签并重建索引 | `tools/cli-usage.md` → `facts/architecture.md`（内容模型） | `skills/add-library-search-preview.md` |
