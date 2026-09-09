@@ -46,7 +46,7 @@
         <input x-ref="input"
                class="search-input wails-no-drag"
                type="search"
-               placeholder="搜索 zoro…"
+               :placeholder="mode === 'command' ? '命令…（/help 看全部）' : '搜索 zoro…（/ 进入命令）'"
                autocomplete="off"
                spellcheck="false"
                :value="query"
@@ -60,32 +60,39 @@
 
       <!--
         ② 主体。用 x-if（不是 x-show）：节点被**彻底移出 DOM**，
-           没有结果时窗口里根本不存在这块区域 —— 这就是「透明空框」从物理上消失的原因。
+           没有内容时窗口里根本不存在这块区域 —— 这就是「透明空框」从物理上消失的原因。
+
+        ⚠️ 这里遍历的是 items，不是 results。items 是 app.js 里的 getter，
+           它把四个来源（搜索命中 / 命令候选 / 知识库列表 / 待确认添加）
+           统一成**同一种行形状**：
+             { id, title, indexHtml, meta, action, payload? }
+           所以模板永远不需要 if-else「现在是什么模式」—— 加一种视图只改 app.js。
+           indexHtml 已经在 getter 里转义/高亮过了（R6），模板只管 x-html。
       -->
-      <template x-if="results.length > 0 || detailMode">
+      <template x-if="items.length > 0 || detailMode">
         <div class="flex flex-none items-stretch gap-2.5">
 
           <!--
-            ②a 结果面板。汇总行是面板的头行，与列表共用一块玻璃、一条边框。
-            ⚠️ 宽度是条件的：预览还没出现（activeIndex < 0）时占满整行，
-               预览出现后收窄到 240px —— 结果区外框尺寸始终不变，只是内部让位。
+            ②a 列表面板。汇总行是面板的头行，与列表共用一块玻璃、一条边框。
+            ⚠️ 宽度是条件的：预览还没出现时占满整行，预览出现后收窄到 240px
+               —— 列表外框尺寸始终不变，只是内部让位。判据是 previewVisible
+               （getter），不是 activeIndex：命令行下选中一行并没有预览。
           -->
           <template x-if="!detailMode">
             <div class="glass-panel flex max-h-[320px] flex-col overflow-hidden"
-                 :class="activeIndex >= 0 ? 'w-60 flex-none' : 'w-full'">
+                 :class="previewVisible ? 'w-60 flex-none' : 'w-full'">
               <div class="flex-none border-b border-stroke-soft px-3.5 py-[5px] text-xs text-muted"
                    x-text="summaryText"></div>
               <ul x-ref="list" class="min-h-0 flex-1 list-none overflow-y-auto p-2">
-                <template x-for="(c, i) in results"
-                          :key="c.library + '|' + c.path + '|' + c.start + '|' + i">
+                <template x-for="(it, i) in items" :key="it.id">
                   <li class="result-item"
                       :class="{ 'is-active': i === activeIndex }"
-                      @click="select(i)">
-                    <div class="font-semibold" x-text="c.title"></div>
+                      @click="activate(i)">
+                    <div class="font-semibold" x-text="it.title"></div>
                     <div class="item-index mt-0.5 break-all text-xs text-muted"
-                         x-html="highlightHtml(c.index, c.matches)"></div>
+                         x-html="it.indexHtml"></div>
                     <div class="mt-[3px] text-[11px] text-muted opacity-80"
-                         x-text="c.library + ' · ' + c.path + ':' + c.start"></div>
+                         x-show="it.meta" x-text="it.meta"></div>
                   </li>
                 </template>
               </ul>
@@ -99,7 +106,7 @@
                outerHTML 手工救回它、再靠事件委托兜底 —— 那一整类 bug 在这里
                从结构上不存在了。
           -->
-          <template x-if="detailMode || activeIndex >= 0">
+          <template x-if="previewVisible">
             <div class="glass-panel relative flex min-w-0 flex-1 flex-col overflow-hidden"
                  :class="detailMode ? 'h-[540px] wails-drag' : 'max-h-[320px]'">
               <button type="button"
@@ -118,11 +125,11 @@
         </div>
       </template>
 
-      <!-- ③ 状态栏。详情模式下隐藏。 -->
+      <!-- ③ 状态栏。详情模式下隐藏；提示文字随当前视图变化（见 app.js get hint）。 -->
       <div class="status-bar flex flex-none items-baseline justify-between gap-2.5 px-1 text-xs text-muted"
            x-show="showFooter">
         <span class="min-w-0 truncate" x-text="footerText"></span>
-        <span class="flex-none whitespace-nowrap opacity-80">↵ 详情 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏/返回</span>
+        <span class="flex-none whitespace-nowrap opacity-80" x-text="hint"></span>
       </div>
 
     </main>
