@@ -183,12 +183,9 @@ func runAdd(args []string) {
 		os.Exit(2)
 	}
 	name, rootArg := pos[0], pos[1]
-	if strings.TrimSpace(name) == "" {
-		fmt.Fprintln(os.Stderr, "error: library name must not be empty")
-		os.Exit(2)
-	}
-	if name != strings.TrimSpace(name) || strings.ContainsAny(name, " \t") {
-		fmt.Fprintln(os.Stderr, "error: library name must not contain whitespace (spaces/tabs)")
+	// 库名合法性只有一处定义（core.ValidateLibraryName），Launcher /lib add 同样走它。
+	if err := core.ValidateLibraryName(name); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(2)
 	}
 	if strings.TrimSpace(rootArg) == "" {
@@ -226,9 +223,9 @@ func runAdd(args []string) {
 	}
 	rootAbs = filepath.Clean(rootAbs)
 
-	cfg.Libraries = append(cfg.Libraries, core.LibrarySpec{Name: name, Root: rootAbs})
-	if setDefault || (len(cfg.Libraries) == 1 && cfg.Default == "") {
-		cfg.Default = name
+	// 首个库且当前没有 default → 自动设为 default（判定基于追加前的数量）。
+	if len(cfg.Libraries) == 0 && cfg.Default == "" {
+		setDefault = true
 	}
 
 	// 新库根目录不存在则创建，保证随后 index / search 立即可用。
@@ -241,12 +238,14 @@ func runAdd(args []string) {
 		fatalf("error: 检查库目录失败 %s: %v\n", rootAbs, err)
 	}
 
-	if err := core.WriteWorkspaceConfig(wsPath, cfg); err != nil {
-		fatalf("error: 写回工作区失败 %s: %v\n", wsPath, err)
+	// 外科式追加：除了新增的 [[libraries]] 段，zoro.toml 的其它字节一个不动
+	//（注释、用户手写的顶层未知键都保住）。见 core/configedit.go。
+	if err := core.AddLibraryToWorkspace(wsPath, name, rootAbs, setDefault); err != nil {
+		fatalf("error: %v\n", err)
 	}
 
 	fmt.Printf("added\t%s\t%s\n", name, rootAbs)
-	if cfg.Default == name {
+	if setDefault {
 		fmt.Printf("default\t%s\n", name)
 	}
 }

@@ -372,12 +372,3 @@ func diffFingerprints(prev, now map[string]FileFingerprint) (dirty, removed map[
 	}
 	return dirty, removed
 }
-
-// atomicWrite writes via a temp file and renames it over the destination.
-func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}

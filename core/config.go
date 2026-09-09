@@ -188,6 +188,10 @@ func MarshalWorkspaceConfig(cfg WorkspaceConfig) (string, error) {
 
 // WriteWorkspaceConfig serializes and writes a `zoro.toml`, creating the
 // parent directory when needed (best effort; empty/relative parents are fine).
+//
+// ⚠️ 这是**整文件重写**：注释和用户手写的顶层未知键都会丢失。只在新建文件、
+// 或确实要改库级 config 时使用；「只加一个库 / 只改 default」请走
+// AddLibraryToWorkspace / SetDefaultLibrary（外科式，见 configedit.go）。
 func WriteWorkspaceConfig(path string, cfg WorkspaceConfig) error {
 	text, err := MarshalWorkspaceConfig(cfg)
 	if err != nil {
@@ -198,7 +202,7 @@ func WriteWorkspaceConfig(path string, cfg WorkspaceConfig) error {
 			return err
 		}
 	}
-	return os.WriteFile(path, []byte(text), 0o644)
+	return atomicWriteFile(path, []byte(text))
 }
 
 func libraryConfigToMap(c LibraryConfig) map[string]any {
