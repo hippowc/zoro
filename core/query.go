@@ -176,10 +176,10 @@ func SearchWith(matcher Matcher, blocks []Block, library, query string) []Candid
 // singleMatcherFace wraps a Matcher for SearchWith backward compat.
 type singleMatcherFace struct{ m Matcher }
 
-func (f *singleMatcherFace) Name() string          { return "index" }
-func (f *singleMatcherFace) Weight() float64       { return 1.0 }
-func (f *singleMatcherFace) Text(b *Block) string  { return b.IndexText() }
-func (f *singleMatcherFace) Matcher() Matcher      { return f.m }
+func (f *singleMatcherFace) Name() string         { return "index" }
+func (f *singleMatcherFace) Weight() float64      { return 1.0 }
+func (f *singleMatcherFace) Text(b *Block) string { return b.IndexText() }
+func (f *singleMatcherFace) Matcher() Matcher     { return f.m }
 
 // SearchMultiFace runs all faces and merges results.
 // Same block hit by multiple faces → one candidate with accumulated scores.

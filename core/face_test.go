@@ -126,7 +126,7 @@ func TestSearchMultiFaceWeightsAffectRanking(t *testing.T) {
 		Block{Title: "定投笔记", Terms: []string{"其他"}, Path: "notes.md", Start: 1},
 	}
 	faces := []Face{
-		IndexFace{W: 1.0}, // low weight for index
+		IndexFace{W: 1.0},  // low weight for index
 		TitleFace{W: 10.0}, // high weight for title
 	}
 	hits := SearchMultiFace(faces, bs, "lib", "定投")
