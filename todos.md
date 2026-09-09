@@ -3,13 +3,14 @@
 > 本文件只记录**下一步做什么**；设计决策一律以 [agents.md](agents.md)（第一版）为唯一事实源。
 > 任务由近及远排列；每项标注归属：`core`（核心库）/ `cmd/zoro`（CLI 前端）/ `ext`（扩展 workspace）。
 
-## 进度快照（截至 2026-09-07）
+## 进度快照（截至 2026-09-09）
 
 - ✅ 技术栈迁移：Rust + Tauri → **Go + Wails v2**，agents.md 精简定稿为「第一版」
 - ✅ core 已迁移至 `core/`（Go package）：Block 统一标签模型 / Registry / manifest v2 / Workspace / 库级配置
 - ✅ CLI MVP 落地至 `cmd/zoro`：`add`（添加知识库并写回 zoro.toml）/ `search` / `preview` / `open`（打开源文件）/ `html` / `text` / `index`；`serve` 仍为 P2 占位
 - ✅ `ext/zoro-launcher` Wails 骨架：Query/Preview/Copy 桥接已就位
 - ✅ 桌面 Launcher macOS MVP 已就绪（待用户 Mac 实测）：Carbon 全局热键 Cmd+Shift+Z（无辅助功能/输入监控权限）+ 无边框置顶透明浮窗 + 查询/预览/复制/打开源文件
+- ✅ Launcher 前端重构为 **Tailwind CSS + Alpine.js**，窗口高度随内容自适应（Spotlight 式，待 Mac 实测）：见看板 9.55 与 `kb/facts/decisions.md` AD-12
 - ✅ `go test ./...` 全绿（单测 + 集成）；示例工作区 `zoro index / search 定投 / preview 定投 / text 定投 / html 定投` 手动可用
 - 当前等价阶段：**P0 完成；P1 收尾完成**（Matcher 接口 + 高亮区间 / HTML·ANSI·纯文本三 target / manifest 文件级指纹 / CLI 子命令 / 库级配置接入运行时分派）
 - 下一阶段：P2 `zoro serve` 与 P3 CLI fzf + `@shell` Action（`allow_exec` helper 已就位，执行注册表到 P3 落地）
@@ -40,7 +41,8 @@
 | # | 任务 | 归属 | 说明 / 验收 |
 |---|------|------|-------------|
 | 9.5 | ✅ Launcher 单平台 Spike（代码就绪，待 Mac 实测体验） | ext/zoro-launcher | Wails v2：常驻进程 + Carbon 全局热键（Cmd+Shift+Z）+ 无边框透明浮窗 + 自绘列表；动作「复制 + 打开渲染 + 打开源文件」；不回填；`./build-macos.sh` 在 Mac 上构建 |
-| 9.6 | 🔄 **Wails v3 多窗口升级**（等待稳定版） | ext/zoro-launcher | **TODO**: 等 Wails v3 稳定版发布后，升级实现真正的原生多窗口 + Always on Top。当前使用 Preview.app 临时方案。参考：`kb/journal/2026-09-08-wails-v3-multiwindow-plan.md` |
+| 9.55 | ✅ **前端架构重构：Tailwind CSS 3.4.19 + Alpine.js 3.17.2 + 窗口高度自适应**（代码就绪，待 Mac 实测） | ext/zoro-launcher | 目标是让反复出现的三类 UI bug 在**结构上不可能发生**：① Alpine `x-if` 把无结果区从 DOM 物理移除；② 窗口高度 = 内容高度（`fitWindowToContent()` 是唯一写入点，`main.go` MinHeight 380→60）；③ 单一 Alpine 状态源 + `get summaryText()` 派生汇总，零手写更新点。样式唯一源 `frontend/src/input.css`（`dist/styles.css` 是生成物）。见 `kb/facts/decisions.md` AD-12、`ext/zoro-launcher/frontend/README.md` |
+| 9.6 | 🔄 **Wails v3 多窗口升级**（等待稳定版） | ext/zoro-launcher | **TODO**: 等 Wails v3 稳定版发布后，升级实现真正的原生多窗口 + Always on Top。当前「详情」是同窗口内的详情模式（Enter 进入）；Go 侧 `PopoutResult` 借系统浏览器，前端未绑定按键。参考：`kb/journal/2026-09-08-wails-v3-multiwindow-plan.md` |
 | 9.7 | Launcher 三平台 + 回填（后续，视 Spike 结论） | ext/zoro-launcher | 回填按平台可选：macOS/Windows 可行，X11 凑合、Wayland 降级；GUI 大众分发走 Developer ID + 公证，延后到真正大众化阶段 |
 | 10 | 全文搜索 | core | 三面搜索之正文兜底面（bleve/zinc 再定）：`index`=精确面、`title`=召回面、`raw`=兜底面（见 agents.md §7） |
 | 11 | 静态站点发布 | ext/zoro-publish | 把库导出为静态 HTML + 站点搜索（pagefind）；个人站点/分享场景 |
@@ -58,6 +60,8 @@
 - **同主题块聚合**：`index` 块与同主题 `shell`/`video` 块命中并排显示的问题，留待 P3 交互前端设计。
 - **稳定条目 id**：当前用 `(library, path, start)` 定位；跨编辑引用跳转需再引入内容锚点。
 - **`@card` 等块组件**：语法已设计、渲染注册表未实现；等 Web/桌面 target 需要时再做。
+- **Launcher `DisableResize: true`**：窗口高度现在由内容驱动，用户手动拉伸会与 `fitWindowToContent()` 打架；是否禁掉手动缩放待 Mac 实测后再定。
+- **Launcher `popoutActive()` 未绑定**：Go 侧 `PopoutResult` 与前端方法都保留（`app.js` 有注释），等 Wails v3 多窗口或用户明确需求再决定绑到哪个键。
 
 ## 下一步建议顺序
 

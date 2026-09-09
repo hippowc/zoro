@@ -24,6 +24,13 @@ jobs:
             go.sum
             ext/zoro-launcher/go.sum
 
+      - name: Set up Node (Tailwind CSS 编译需要)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ext/zoro-launcher/frontend/package-lock.json
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
@@ -33,6 +40,13 @@ jobs:
           export PATH="$(go env GOPATH)/bin:$PATH"
           export GOPROXY="https://proxy.golang.org,direct"
           wails build -clean -platform darwin/arm64 -o zoro-launcher
+
+      - name: Verify frontend assets were compiled
+        working-directory: ext/zoro-launcher
+        run: |
+          test -s frontend/dist/styles.css
+          grep -q 'glass-panel' frontend/dist/styles.css
+          grep -q 'wails-draggable' frontend/dist/styles.css
 
       - name: Package .app
         run: |

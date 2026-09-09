@@ -1,36 +1,130 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN"
+      x-data="launcher()"
+      :data-theme="theme"
+      @keydown.window="onKeydown($event)">
+  <!--
+    整个应用只有一个 Alpine 组件，根就在 <html> 上：
+      :data-theme 让主题成为纯状态（this.theme = 'dark-glass' 即可），
+      不再有任何 document.documentElement.setAttribute 之类的命令式 DOM 操作。
+      @keydown.window 把监听器挂到 window 上，等价于旧的
+      document.addEventListener("keydown", …)。
+    ⚠️ 不要把 x-ref 放在这个元素上：Alpine 里 ref 的优先级高于 data，
+       会把 ref 注册到父作用域去。
+  -->
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>zoro</title>
     <link rel="stylesheet" href="./styles.css" />
+    <!--
+      ⚠️ 脚本顺序不可调换，两个都必须带 defer：
+        1) app.js 先执行，定义 window.launcher；
+        2) alpine.js 后执行，它在末尾 queueMicrotask(() => Alpine.start())；
+        3) 该微任务在两个 defer 脚本之间就会跑 —— 如果顺序反了，
+           Alpine.start() 会在 window.launcher 还不存在时求值 x-data，整页失效。
+      Wails 会把 /wails/ipc.js 和 /wails/runtime.js 无 defer 地插到 <head> 最前面，
+      所以 window.go / window.runtime 在这里一定已经就绪。
+    -->
+    <script defer src="./app.js"></script>
+    <script defer src="./alpine.js"></script>
   </head>
-  <body>
-    <main class="shell">
-      <header class="top" style="--wails-draggable: drag">
-        <div class="search-box">
-          <span class="search-icon" aria-hidden="true">⌕</span>
-          <input id="query" class="query" type="search" placeholder="搜索 zoro…"
-                 autocomplete="off" style="--wails-draggable: no-drag" />
-          <button id="clear" class="clear-btn" type="button" title="清空" aria-label="清空"
-                  style="--wails-draggable: no-drag">×</button>
+
+  <body class="bg-transparent text-fg">
+    <!--
+      shell = 窗口自适应高度的唯一测量对象（app.js fitWindowToContent）。
+      ⚠️ 它的高度必须 100% 由内容决定。不要给它或它的任何祖先加
+         height / 100vh / min-h-screen，否则 ResizeObserver 会与窗口尺寸形成回路。
+      text-[15px] 取代旧 :root{font-size:15px}（原因见 src/input.css 第 1 节）。
+    -->
+    <main x-ref="shell" class="flex flex-col gap-2.5 p-3.5 text-[15px]">
+
+      <!-- ① 搜索行。详情模式下隐藏（x-show）。 -->
+      <div class="search-row glass-panel wails-drag flex flex-none items-center gap-2 pl-3.5 pr-3"
+           x-show="!detailMode">
+        <span class="flex-none select-none text-base leading-none text-muted" aria-hidden="true">⌕</span>
+        <input x-ref="input"
+               class="search-input wails-no-drag"
+               type="search"
+               placeholder="搜索 zoro…"
+               autocomplete="off"
+               spellcheck="false"
+               :value="query"
+               @input="onQueryInput($event.target.value)" />
+        <button type="button"
+                class="icon-btn wails-no-drag h-5 w-5 rounded-full text-sm"
+                title="清空" aria-label="清空"
+                x-show="query.length > 0"
+                @click="clearQuery()">×</button>
+      </div>
+
+      <!--
+        ② 主体。用 x-if（不是 x-show）：节点被**彻底移出 DOM**，
+           没有结果时窗口里根本不存在这块区域 —— 这就是「透明空框」从物理上消失的原因。
+      -->
+      <template x-if="results.length > 0 || detailMode">
+        <div class="flex flex-none items-stretch gap-2.5">
+
+          <!--
+            ②a 结果面板。汇总行是面板的头行，与列表共用一块玻璃、一条边框。
+            ⚠️ 宽度是条件的：预览还没出现（activeIndex < 0）时占满整行，
+               预览出现后收窄到 240px —— 结果区外框尺寸始终不变，只是内部让位。
+          -->
+          <template x-if="!detailMode">
+            <div class="glass-panel flex max-h-[320px] flex-col overflow-hidden"
+                 :class="activeIndex >= 0 ? 'w-60 flex-none' : 'w-full'">
+              <div class="flex-none border-b border-stroke-soft px-3.5 py-[5px] text-xs text-muted"
+                   x-text="summaryText"></div>
+              <ul x-ref="list" class="min-h-0 flex-1 list-none overflow-y-auto p-2">
+                <template x-for="(c, i) in results"
+                          :key="c.library + '|' + c.path + '|' + c.start + '|' + i">
+                  <li class="result-item"
+                      :class="{ 'is-active': i === activeIndex }"
+                      @click="select(i)">
+                    <div class="font-semibold" x-text="c.title"></div>
+                    <div class="item-index mt-0.5 break-all text-xs text-muted"
+                         x-html="highlightHtml(c.index, c.matches)"></div>
+                    <div class="mt-[3px] text-[11px] text-muted opacity-80"
+                         x-text="c.library + ' · ' + c.path + ':' + c.start"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+
+          <!--
+            ②b 预览面板。
+            ⚠️ 返回按钮是 x-html 容器的**兄弟节点**，不在 x-html 里面。
+               旧代码把 backBtn 塞进 previewEl.innerHTML，每次预览都要用
+               outerHTML 手工救回它、再靠事件委托兜底 —— 那一整类 bug 在这里
+               从结构上不存在了。
+          -->
+          <template x-if="detailMode || activeIndex >= 0">
+            <div class="glass-panel relative flex min-w-0 flex-1 flex-col overflow-hidden"
+                 :class="detailMode ? 'h-[540px] wails-drag' : 'max-h-[320px]'">
+              <button type="button"
+                      class="icon-btn wails-no-drag absolute right-2 top-2 z-10 h-7 w-7 rounded-full bg-glass-strong text-lg"
+                      title="返回搜索" aria-label="返回搜索"
+                      x-show="detailMode"
+                      @click="exitDetail()">←</button>
+              <div class="min-h-0 flex-1 overflow-y-auto p-2">
+                <div x-show="previewLoading" class="p-2.5 text-xs text-muted">加载中…</div>
+                <div x-show="previewError" class="p-2.5 text-xs text-muted" x-text="previewError"></div>
+                <div class="md-body" x-html="previewHtml"></div>
+              </div>
+            </div>
+          </template>
+
         </div>
-        <div id="summary" class="summary is-hidden"></div>
-      </header>
+      </template>
 
-      <section id="body" class="body">
-        <ul id="results" class="results"></ul>
-        <article id="preview" class="preview">
-          <button id="backBtn" class="back-btn" type="button" title="返回搜索" aria-label="返回搜索">←</button>
-        </article>
-      </section>
+      <!-- ③ 状态栏。详情模式下隐藏。 -->
+      <div class="status-bar flex flex-none items-baseline justify-between gap-2.5 px-1 text-xs text-muted"
+           x-show="showFooter">
+        <span class="min-w-0 truncate" x-text="footerText"></span>
+        <span class="flex-none whitespace-nowrap opacity-80">↵ 详情 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏/返回</span>
+      </div>
 
-      <footer class="status is-hidden">
-        <span id="status">启动中…</span>
-        <span class="hint">↵ 详情 · ⌘↵ 打开源文件 · ⌘C 复制 · Esc 隐藏/返回</span>
-      </footer>
     </main>
-    <script src="./app.js"></script>
   </body>
 </html>

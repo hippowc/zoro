@@ -47,8 +47,56 @@
 
 ## P-6 Launcher 前端 UI 与原生窗口背景不同步
 
-- **状态**：active
-- **触发**：只改 `frontend/dist/*.css` 的透明声明，不动 `main.go` 的原生窗口配置。
+- **状态**：active（2026-09-08 前端重构后由三层变四层）
+- **触发**：只改前端 CSS 的透明声明，不动 `main.go` 的原生窗口配置；或反过来。
 - **症状**：CSS 已 `background: transparent`，但窗口仍出背景块或深色块。
-- **根因**：透明由“原生窗口层 + WebView 透明 + CSS 透明”三层共同决定，缺一层都不生效。
-- **修法**：改动 UI 透明效果时三层一起检查：`main.go`（P-1）→ `frontend/dist/index.html` / `styles.css` → `app.js` 桥接结果判空（P-2）。
+- **根因**：透明由「原生窗口层 + WebView 透明 + CSS 透明 + 桥接判空」四层共同决定，缺一层都不生效。
+- **修法**：四层一起检查：`main.go`（P-1/P-11）→ `frontend/src/input.css`（**不是 `dist/styles.css`，后者是生成物，见 P-7**）→ `frontend/dist/index.html` → `frontend/dist/app.js` 桥接结果判空（P-2）。
+
+## P-7 手改 `dist/styles.css` 的改动凭空消失
+
+- **状态**：active
+- **触发**：直接编辑 `ext/zoro-launcher/frontend/dist/styles.css`。
+- **症状**：改完当场生效，下一次 `wails build` / `npm run build` 后改动全无。
+- **根因**：该文件是 Tailwind 的编译产物，`frontend:build` 钩子每次整文件覆盖。
+- **修法**：改 `frontend/src/input.css`，再 `npm run build`。生成物已用 `.gitattributes linguist-generated=true` 标记，PR 里默认折叠。
+
+## P-8 Tailwind `@layer` 里的自定义类被 purge，构建却是绿的
+
+- **状态**：active
+- **触发**：`tailwind.config.js` 的 `content` 路径写错 / 漏了 `dist/app.js`；或类名只在运行时字符串里拼接。
+- **症状**：`npm run build` 成功、`wails build` 成功、应用照常签名发布，但界面完全没样式（`styles.css` 只剩几 KB 的 preflight）。
+- **根因**：Tailwind 会 purge `@layer components` / `@layer utilities` 里「没在 content 文件中以字面量出现」的类；`content` 错了就等于所有自定义类都没被用到。
+- **修法**：类名必须以字面量出现在 `content` 覆盖的文件里（`dist/index.html` + `dist/app.js`，**绝不含 `dist/alpine.js`**——压缩过的第三方代码会提取出成百上千假类名）；改完 `grep <类名> dist/styles.css` 自查；CI 的 `Verify frontend assets were compiled` 步骤是唯一的自动兜底，不要删。
+
+## P-9 预览区 Markdown / 命中高亮样式消失
+
+- **状态**：active
+- **触发**：把 `.md-body`、`mark` 相关规则放进 `@layer components` 或 `@layer utilities`。
+- **症状**：搜索结果的高亮底色没了、预览区 Markdown 变成一坨无样式文本，但构建全绿。
+- **根因**：这两处 HTML 是运行时才生成的（`x-html` 注入 Go `RenderHTML` 的产物、`highlight()` 产出的 `<mark>`），Tailwind 的扫描器永远看不到它们，放进 `@layer` 必被 purge。
+- **修法**：放 `src/input.css` **第 5 节**，即任何 `@layer` 之外的普通 CSS。代价是它排在 utilities 之后，所以不要再在同一元素上叠 Tailwind 工具类（会反过来被压掉）。
+
+## P-10 窗口高度抖动 / ResizeObserver 自激
+
+- **状态**：active（预防性）
+- **触发**：在 `<main x-ref="shell">` 子树里使用 `100vh` / `h-screen` / `height:100%`。
+- **症状**：窗口高度反复跳动，或稳定在一个错误的值。
+- **根因**：窗口高度决定 webview 高度，视口相关高度又让内容高度跟随 webview → 「窗口高度 ↔ 内容高度」互为因果形成回路。
+- **修法**：shell 高度必须 100% 由内容决定；窗口尺寸只由 `app.js` 的 `fitWindowToContent()` 单向下发（rAF 合帧 + `lastWindowHeight` 去重）。
+
+## P-11 窗口收不下去 / 从 JS 改 MinSize 后窗口顶边跳一下
+
+- **状态**：fixed-in-launcher-tailwind-alpine-20260909
+- **触发**：① `main.go` 的 `MinHeight` 大于前端「仅搜索框」的内容高度；② 在 JS 里调 `window.runtime.WindowSetMinSize()`。
+- **症状**：① `WindowSetSize(780, 76)` 被静默夹到 380，窗口下方留一大块透明空白（用户看到的「透明框」真身）；② 调用瞬间窗口整体明显跳一下。
+- **根因**：① darwin `SetSize` 走 `setFrame:`，受 NSWindow `userMinSize` 约束，而 `userMinSize` 由 `options.MinHeight` 在创建时初始化；② darwin `SetMinSize` 走 `adjustWindowSize()`，它做的 `setFrame:` **不重新锚定顶边**（对比 `SetSize` 会做 `origin.y += size.height - height`）。
+- **修法**：`MinHeight` 降到 60（≤ 仅搜索框高度 76），与 `app.js` 的 `MIN_WINDOW_HEIGHT` 保持一致；`MinHeight` **只能**在 `main.go` 改，前端永不调 `WindowSetMinSize`。
+
+## P-12 改 `:root` 字号导致整个 UI 缩放 6.25%
+
+- **状态**：active（预防性）
+- **触发**：为了「恢复旧版默认字号」把 `:root { font-size: 15px }` 加回去。
+- **症状**：所有 padding / gap / width 一起变小（`p-3.5` 从 14px 变 13.125px），布局看着哪儿哪儿都不对，但没有任何报错。
+- **根因**：Tailwind 的整套间距刻度基于 `rem`，改根字号等于全局缩放。
+- **修法**：根字号保持浏览器默认 16px；默认字号用 shell 上的 `text-[15px]` 表达（只影响文字，不影响间距刻度）。

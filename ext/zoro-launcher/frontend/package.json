@@ -1,0 +1,13 @@
+{
+  "name": "zoro-launcher-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "zoro launcher 前端构建。唯一的构建步骤：用 Tailwind CLI 把 src/input.css 编译成 dist/styles.css。index.html / app.js / alpine.js 手写并直接提交，不打包。",
+  "scripts": {
+    "build": "tailwindcss -c ./tailwind.config.js -i ./src/input.css -o ./dist/styles.css --minify",
+    "watch": "tailwindcss -c ./tailwind.config.js -i ./src/input.css -o ./dist/styles.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.19"
+  }
+}

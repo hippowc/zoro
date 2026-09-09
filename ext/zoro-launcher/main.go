@@ -20,11 +20,20 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:             "zoro",
-		Width:             780,
-		Height:            580,
-		MinWidth:          560,
-		MinHeight:         380,
+		Title: "zoro",
+		Width: 780,
+		// 初值 = 「只有搜索框」时的高度；首帧就会被前端 ResizeObserver 纠正。
+		// 用小初值而不是 580，是为了让 JS 万一没跑起来时，窗口是一个
+		// 小小的搜索框，而不是一整块透明空框。
+		Height:   76,
+		MinWidth: 560,
+		// MinHeight 必须 <= 前端「仅搜索框」时的内容高度（约 76px），否则
+		// NSWindow 的 userMinSize 会把 window.runtime.WindowSetSize 的结果
+		// 夹回 380，窗口再也收不下去。
+		// 该值必须与 frontend/dist/app.js 的 MIN_WINDOW_HEIGHT 保持一致，
+		// 且只能在这里改：从 JS 调 WindowSetMinSize 会触发 darwin 的
+		// adjustWindowSize()，它不重新锚定顶边，窗口会 visibly 跳一下。
+		MinHeight:         60,
 		Frameless:         true,
 		AlwaysOnTop:       true,
 		HideWindowOnClose: true,

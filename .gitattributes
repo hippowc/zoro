@@ -1,0 +1,3 @@
+# 生成物 / vendor 文件：在 PR 里折叠，避免淹没人工 review
+ext/zoro-launcher/frontend/dist/styles.css linguist-generated=true
+ext/zoro-launcher/frontend/dist/alpine.js linguist-generated=true -diff

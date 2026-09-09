@@ -3,7 +3,9 @@
 # 首次使用：
 #   1) 安装 Xcode Command Line Tools： xcode-select --install
 #   2) 安装 Go 1.27+（https://go.dev/dl/）
-#   3) 安装 Wails CLI： go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+#   3) 安装 Node.js 18+（https://nodejs.org/ 或 brew install node）
+#      —— frontend/dist/styles.css 由 Tailwind 编译，wails build 会自动跑
+#   4) 安装 Wails CLI： go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 # 之后： ./build-macos.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,6 +18,13 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 if ! command -v wails >/dev/null 2>&1; then
   echo "缺少 wails CLI，正在安装 wails@v2.15.0 …" >&2
   go install "github.com/wailsapp/wails/v2/cmd/wails@v2.15.0"
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "缺少 Node.js/npm：Tailwind 需要它把 frontend/src/input.css" >&2
+  echo "编译成 frontend/dist/styles.css（wails build 会自动触发）。" >&2
+  echo "安装： brew install node   或   https://nodejs.org/" >&2
+  exit 1
 fi
 
 echo "== 构建 darwin/${ARCH} =="

@@ -82,6 +82,21 @@
 - **理由**：后者在较新 macOS 上会在 WebView 后渲染出不透明深色/褐色块，破坏“只有面板有背景、其余全透明”的目标。
 - **何时重新考虑**：若后续要求“原生 behind-window 模糊”且目标 macOS 版本表现稳定，可重新验证 `WindowIsTranslucent` + 新 Wails 版本。
 
+## AD-12 Launcher 前端：Tailwind CSS + Alpine.js + 窗口高度自适应
+
+- **选择**：样式用 Tailwind v3（固定 `3.4.19` LTS，唯一源文件 `frontend/src/input.css`，产物 `dist/styles.css` 提交进仓库）；交互用 Alpine.js（vendor `3.17.2` 的 cdn 构建，不打包）；窗口高度由前端 ResizeObserver 单向贴合内容高度（Spotlight 式）。
+- **否决**：
+  - **继续手写 CSS + vanilla JS**：状态散落在 DOM class（`is-hidden` / `is-visible` / `show-detail` / `show-preview` / `show-results`）里，同一状态多处写入；连续 6 个 `fix(launcher)` 提交都在修同一类问题（内联样式压过类、`innerHTML` 冲掉返回按钮、隐藏不彻底）。用户明确要求「重构到便于后续用低水平大模型开发而不犯错的水平」。
+  - **Vue / React + 打包器（Vite/esbuild）**：给一个约 350 行的 UI 引入第二套构建系统、第二份配置、第二组失败面，收益不成比例。
+  - **Tailwind v4**：CLI 包名与配置方式（CSS-first）都不同，训练语料里占比低，且 v3 有 LTS 线；本次目标是降低后续维护者的犯错概率，不是追新。
+  - **固定窗口高度 + 用 CSS 隐藏空区**：用户多轮反馈的「透明框」真身就是固定 780×580 窗口里的空白透明区（叠加 macOS 窗口阴影），它不是 DOM 元素，`display/visibility/opacity/height/overflow` 五重隐藏都无效。只有让窗口贴合内容才能根治（配合 `MinHeight` 下调，见 P-11）。
+- **理由**：让 bug 类别在**结构上不可能发生**，而不是靠每次小心——`x-if` 把无结果区域移出 DOM（透明框无处依附）；单一 Alpine 组件是唯一状态源；汇总文案用 getter 派生（零个写入点）；窗口尺寸只有一个写入点；返回按钮是 `x-html` 容器的兄弟节点（`innerHTML` 冲不掉）；Tailwind 工具类 + `@layer` 顺序消灭特异性战争。
+- **代价**：
+  - 构建链多一个 Node 依赖（本地 `brew install node`，CI 加 `setup-node@v4`）；`wails build` 会跑 `npm install` + `npm run build`。
+  - `dist/styles.css` 是生成物却必须提交（Go `//go:embed` 需要非空目录，且 Linux 侧无 Node 时要能 `go build .`）→ 新增 P-7 这类「手改生成物」的坑，用 banner 注释 + README 规则 + `.gitattributes` + CI grep 四层缓解。
+  - 引入两条 Tailwind 特有的静默失败路径（P-8 `@layer` purge、P-9 运行时 HTML 样式），CI 的 `Verify frontend assets` 步骤是唯一自动兜底。
+- **何时重新考虑**：UI 规模增长到需要组件复用/路由/双向数据流（例如 Launcher 长出设置面板、多标签页）时，评估 Svelte 或 Vue + Vite；Wails v3 升级（`todos.md` #9.6）时一并重估，因为多窗口会改变「一个窗口一个组件」的前提。
+
 ## 待定项（backlog）
 
 - tag / facet：标签名即 facet；按 facet 过滤的 query（如 `-t video`）待做。

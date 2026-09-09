@@ -1,0 +1,216 @@
+/* ============================================================
+   zoro launcher —— 样式的唯一源文件
+   编译产物：frontend/dist/styles.css
+     由 `npm run build` 生成（wails build 通过 frontend:build 钩子自动执行）。
+   ⚠️ 永远不要直接编辑 dist/styles.css：下一次构建会整文件覆盖。
+   ⚠️ 下面 5 个小节的「放哪一层」是正确性问题，不是风格问题：
+        第 1、2、5 节 = 普通 CSS，Tailwind 永不 purge；
+        第 3、4 节   = @layer，Tailwind 会 purge 掉没用到的类。
+   ============================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------
+   1. 主题变量 —— 普通 CSS（不在任何 @layer 里）
+      放在 @layer 外 = Tailwind 永远不会 purge 它，主题切换零风险。
+      取值与重构前的 styles.css **逐字一致**，不要顺手「优化」。
+      ⚠️ 这里不再有 `font-size: 15px`：Tailwind 的间距刻度全部基于 rem，
+         把根字号改成 15px 会让每个 padding/gap/width 缩小 6.25%。
+         默认字号改由 index.html 里 shell 上的 text-[15px] 提供。
+   ------------------------------------------------------------ */
+:root {
+  /* Light Glass（默认） */
+  --fg: #1c1e24;
+  --muted: rgba(28, 30, 36, 0.58);
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.72);
+  --stroke: rgba(255, 255, 255, 0.65);
+  --stroke-soft: rgba(255, 255, 255, 0.35);
+  --active: rgba(17, 19, 25, 0.07);
+  --mark: rgba(255, 197, 65, 0.55);
+  --bg-blur: blur(22px) saturate(160%);
+}
+
+[data-theme="dark-glass"] {
+  --fg: #e8eaed;
+  --muted: rgba(232, 234, 237, 0.55);
+  --glass: rgba(30, 32, 40, 0.60);
+  --glass-strong: rgba(40, 42, 52, 0.75);
+  --stroke: rgba(255, 255, 255, 0.12);
+  --stroke-soft: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.08);
+  --mark: rgba(99, 141, 255, 0.35);
+  --bg-blur: blur(22px) saturate(140%);
+}
+
+[data-theme="minimal"] {
+  --fg: #1c1e24;
+  --muted: rgba(28, 30, 36, 0.50);
+  --glass: rgba(245, 246, 248, 0.95);
+  --glass-strong: rgba(255, 255, 255, 1);
+  --stroke: rgba(0, 0, 0, 0.08);
+  --stroke-soft: rgba(0, 0, 0, 0.04);
+  --active: rgba(17, 19, 25, 0.05);
+  --mark: rgba(255, 197, 65, 0.45);
+  --bg-blur: none;
+}
+
+/* ------------------------------------------------------------
+   2. 全局元素基线 —— 普通 CSS，排在 @tailwind utilities 之后
+      ⚠️ 窗口自适应高度的硬前提：
+         html / body / shell 及其子树里**禁止**出现任何视口相关高度
+         （height:100%、100vh、100dvh、min-h-screen 一律不许）。
+         否则「窗口高度 → webview 高度 → 内容高度 → 窗口高度」形成回路，
+         ResizeObserver 会自激抖动。窗口高度只能由 app.js 单向决定。
+   ------------------------------------------------------------ */
+html,
+body {
+  margin: 0;
+  background: transparent; /* 三层透明之一，见 kb/facts/pitfalls.md P-1/P-6 */
+  color: var(--fg);
+}
+body {
+  overflow: hidden; /* 面板各自滚动；页面级滚动条会破坏高度测量 */
+}
+
+/* ------------------------------------------------------------
+   3. 组件类 —— @layer components
+      放进 components 层的唯一目的：保证 Tailwind 工具类**永远**能覆盖它们
+      （utilities 在 components 之后输出）。这就是「不可能再打特异性战争」的机制。
+      ⚠️ @layer 里的类会被 purge：类名必须以字面量出现在
+         dist/index.html 或 dist/app.js 里。改完构建后 grep 一下产物确认它还在。
+   ------------------------------------------------------------ */
+@layer components {
+  .glass-panel {
+    background: var(--glass);
+    border: 1px solid var(--stroke);
+    border-radius: 12px;
+    box-shadow:
+      0 8px 28px rgba(31, 35, 46, 0.10),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    /* ⚠️ 两个前缀都必须写。macOS 14 的 WKWebView (Safari 17) 只认 -webkit-。
+       不要改用 Tailwind 的 backdrop-blur-* —— 它不带 -webkit- 前缀。 */
+    backdrop-filter: var(--bg-blur);
+    -webkit-backdrop-filter: var(--bg-blur);
+  }
+
+  /* 搜索框获得焦点时的加强态，对应旧 .search-box:focus-within。
+     用 CSS 伪类而不是 Alpine 状态：零个 JS 写入点。 */
+  .search-row:focus-within {
+    background: var(--glass-strong);
+    border-color: rgba(255, 255, 255, 0.85);
+    box-shadow:
+      0 10px 32px rgba(31, 35, 46, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  }
+
+  .search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 11px 0;
+    font-size: 16px;
+    color: var(--fg);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .search-input::placeholder { color: var(--muted); }
+  .search-input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+
+  .icon-btn {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    line-height: 1;
+    color: var(--muted);
+    background: rgba(17, 19, 25, 0.08);
+    cursor: pointer;
+    transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+  }
+  .icon-btn:hover { background: rgba(17, 19, 25, 0.14); color: var(--fg); }
+
+  .result-item {
+    padding: 9px 11px;
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .result-item:hover { background: rgba(17, 19, 25, 0.05); }
+  .result-item.is-active { background: var(--active); }
+
+  .status-bar { text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6); }
+}
+
+/* ------------------------------------------------------------
+   4. Wails 拖拽区 —— @layer utilities
+      Wails 的拖拽判定是 getComputedStyle(e.target) 读 --wails-draggable
+      是否等于 "drag"。CSS 自定义属性**会继承**，
+      所以给面板加 .wails-drag，面板内所有后代（含 x-html 注入的 Markdown）
+      都可拖；返回按钮单独加 .wails-no-drag 覆盖继承值。
+      ⚠️ 必须放在 utilities 层：它要能覆盖 components 层的任何声明。
+   ------------------------------------------------------------ */
+@layer utilities {
+  .wails-drag    { --wails-draggable: drag; }
+  .wails-no-drag { --wails-draggable: no-drag; }
+}
+
+/* ------------------------------------------------------------
+   5. 运行时生成的 HTML 的样式 —— 普通 CSS，**绝不放进 @layer**
+      两处 HTML 是运行时才产生的，Tailwind 的扫描器永远看不到它们：
+        (a) x-html 注入的 Markdown（Go core.RenderMarkdownHTML 的产物）
+        (b) highlight() 产出的 <mark>
+      放进 @layer 会被 purge 掉 → 预览区/高亮样式凭空消失。
+      ⚠️ 规则：不要在这一节的类名所在元素上再叠 Tailwind 工具类，
+         因为普通 CSS 排在 utilities 之后，会反过来压掉工具类。
+   ------------------------------------------------------------ */
+.item-index mark,
+.md-body mark {
+  color: var(--fg);
+  background: var(--mark);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.md-body { font-size: 14px; line-height: 1.65; color: var(--fg); }
+/* ⚠️ Tailwind preflight 把 h1-h6 的 font-size/font-weight 重置为 inherit，
+      把 ol/ul 的 list-style 与 padding 清零。下面两条是**还原浏览器默认**，
+      不是新增样式；删掉它们 Markdown 预览的标题会和正文一样大、列表没有符号。 */
+.md-body h1,
+.md-body h2,
+.md-body h3 { margin: 1em 0 0.5em; font-weight: 600; }
+.md-body h1 { font-size: 2em; }
+.md-body h2 { font-size: 1.5em; }
+.md-body h3 { font-size: 1.17em; }
+.md-body p { margin: 0.5em 0; }
+.md-body ul,
+.md-body ol { margin: 0.5em 0 0.5em 1.5em; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 0.25em 0; }
+.md-body pre {
+  background: rgba(17, 19, 25, 0.06);
+  padding: 10px;
+  border-radius: 9px;
+  overflow: auto;
+  margin: 1em 0;
+}
+.md-body code { font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }
+.md-body a { color: #3157d1; }
+.md-body blockquote {
+  border-left: 4px solid var(--stroke-soft);
+  padding-left: 16px;
+  margin: 1em 0;
+  color: var(--muted);
+}
+.md-body table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+.md-body th,
+.md-body td { border: 1px solid var(--stroke-soft); padding: 8px; text-align: left; }
+.md-body th { background: rgba(17, 19, 25, 0.06); }
